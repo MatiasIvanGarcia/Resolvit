@@ -129,8 +129,6 @@ export default {
         const body = await request.json().catch(() => null);
         if (!body?.title) return json({ status: "missing_title" }, 400);
 
-        // Si tu tabla plans requiere owner_id NOT NULL y no tiene trigger,
-        // esto puede fallar. En ese caso, te paso el trigger owner_id=auth.uid().
         const payload = {
           title: body.title,
           person_name: body.person_name ?? null,
@@ -140,7 +138,7 @@ export default {
         const { ok, data } = await supabaseRest(
           env,
           `/rest/v1/plans?select=id,title,person_name,status,start_question_id`,
-          { method: "POST", headers: {Prefer: "return=representation"}, body: JSON.stringify(payload) },
+          { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(payload) },
           token
         );
         if (!ok) return json({ status: "error", detail: data }, 400);
@@ -148,69 +146,132 @@ export default {
       }
 
       // POST /api/private/question { plan_id, ord, title, subtitle }
-if (request.method === "POST" && url.pathname === "/api/private/question") {
-  const token = getAuthToken(request);
-  if (!token) return json({ status: "unauthorized" }, 401);
+      if (request.method === "POST" && url.pathname === "/api/private/question") {
+        const token = getAuthToken(request);
+        if (!token) return json({ status: "unauthorized" }, 401);
 
-  const body = await request.json().catch(() => null);
-  if (!body?.plan_id) return json({ status: "missing_plan_id" }, 400);
-  if (typeof body?.ord !== "number") return json({ status: "missing_ord" }, 400);
+        const body = await request.json().catch(() => null);
+        if (!body?.plan_id) return json({ status: "missing_plan_id" }, 400);
+        if (typeof body?.ord !== "number") return json({ status: "missing_ord" }, 400);
 
-  const payload = {
-    plan_id: body.plan_id,
-    ord: body.ord,
-    title: body.title ?? "¿Qué preferís?",
-    subtitle: body.subtitle ?? null,
-  };
+        const payload = {
+          plan_id: body.plan_id,
+          ord: body.ord,
+          title: body.title ?? "¿Qué preferís?",
+          subtitle: body.subtitle ?? null,
+        };
 
-  const { ok, data } = await supabaseRest(
-    env,
-    `/rest/v1/questions?select=id,plan_id,ord,title,subtitle`,
-    {
-      method: "POST",
-      headers: { Prefer: "return=representation" },
-      body: JSON.stringify(payload),
-    },
-    token
-  );
+        const { ok, data } = await supabaseRest(
+          env,
+          `/rest/v1/questions?select=id,plan_id,ord,title,subtitle`,
+          {
+            method: "POST",
+            headers: { Prefer: "return=representation" },
+            body: JSON.stringify(payload),
+          },
+          token
+        );
 
-  if (!ok) return json({ status: "error", detail: data }, 400);
+        if (!ok) return json({ status: "error", detail: data }, 400);
+        return json(data?.[0] ?? data);
+      }
 
-  // PostgREST devuelve array
-  return json(data?.[0] ?? data);
-}
+      // ✅ PATCH /api/private/question/:id { title?, subtitle?, ord? }
+      if (request.method === "PATCH" && url.pathname.startsWith("/api/private/question/")) {
+        const token = getAuthToken(request);
+        if (!token) return json({ status: "unauthorized" }, 401);
 
-      // POST /api/private/options2 { question_id, a:{label,image_url,next_question_id?}, b:{...} }
-if (request.method === "POST" && url.pathname === "/api/private/options2") {
-  const token = getAuthToken(request);
-  if (!token) return json({ status: "unauthorized" }, 401);
+        const id = url.pathname.split("/").pop() || "";
+        if (!id) return json({ status: "missing_id" }, 400);
 
-  const body = await request.json().catch(() => null);
-  if (!body?.question_id) return json({ status: "missing_question_id" }, 400);
-  if (!body?.a?.label || !body?.b?.label) return json({ status: "missing_labels" }, 400);
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object") return json({ status: "bad_json" }, 400);
 
-  const payload = [
-    { question_id: body.question_id, ord: 1, label: body.a.label, image_url: body.a.image_url ?? null },
-    { question_id: body.question_id, ord: 2, label: body.b.label, image_url: body.b.image_url ?? null },
-  ];
+        // Permitimos solo campos esperados
+        const patch: any = {};
+        if (typeof body.title === "string") patch.title = body.title;
+        if (typeof body.subtitle === "string" || body.subtitle === null) patch.subtitle = body.subtitle;
+        if (typeof body.ord === "number") patch.ord = body.ord;
 
-  const { ok, data } = await supabaseRest(
-    env,
-    `/rest/v1/options?select=id,question_id,ord,label,image_url,next_question_id`,
-    {
-      method: "POST",
-      headers: { Prefer: "return=representation" },
-      body: JSON.stringify(payload),
-    },
-    token
-  );
+        if (Object.keys(patch).length === 0) {
+          return json({ status: "missing_patch_fields" }, 400);
+        }
 
-  if (!ok) return json({ status: "error", detail: data }, 400);
-  return json(data);
-}
+        const { ok, data } = await supabaseRest(
+          env,
+          `/rest/v1/questions?id=eq.${encodeURIComponent(id)}&select=id,plan_id,ord,title,subtitle`,
+          {
+            method: "PATCH",
+            headers: { Prefer: "return=representation" },
+            body: JSON.stringify(patch),
+          },
+          token
+        );
 
+        if (!ok) return json({ status: "error", detail: data }, 400);
+        return json(data?.[0] ?? data);
+      }
 
-      // PATCH /api/private/option/:id { next_question_id }
+      // ✅ DELETE /api/private/question/:id
+      // Borra primero options (por FK), luego la question
+      if (request.method === "DELETE" && url.pathname.startsWith("/api/private/question/")) {
+        const token = getAuthToken(request);
+        if (!token) return json({ status: "unauthorized" }, 401);
+
+        const id = url.pathname.split("/").pop() || "";
+        if (!id) return json({ status: "missing_id" }, 400);
+
+        // 1) borrar options asociadas
+        const delOpts = await supabaseRest(
+          env,
+          `/rest/v1/options?question_id=eq.${encodeURIComponent(id)}`,
+          { method: "DELETE" },
+          token
+        );
+        if (!delOpts.ok) return json({ status: "error", detail: delOpts.data, step: "delete_options" }, 400);
+
+        // 2) borrar question
+        const delQ = await supabaseRest(
+          env,
+          `/rest/v1/questions?id=eq.${encodeURIComponent(id)}`,
+          { method: "DELETE" },
+          token
+        );
+        if (!delQ.ok) return json({ status: "error", detail: delQ.data, step: "delete_question" }, 400);
+
+        return json({ status: "ok" });
+      }
+
+      // POST /api/private/options2 { question_id, a:{label,image_url}, b:{label,image_url} }
+      if (request.method === "POST" && url.pathname === "/api/private/options2") {
+        const token = getAuthToken(request);
+        if (!token) return json({ status: "unauthorized" }, 401);
+
+        const body = await request.json().catch(() => null);
+        if (!body?.question_id) return json({ status: "missing_question_id" }, 400);
+        if (!body?.a?.label || !body?.b?.label) return json({ status: "missing_labels" }, 400);
+
+        const payload = [
+          { question_id: body.question_id, ord: 1, label: body.a.label, image_url: body.a.image_url ?? null },
+          { question_id: body.question_id, ord: 2, label: body.b.label, image_url: body.b.image_url ?? null },
+        ];
+
+        const { ok, data } = await supabaseRest(
+          env,
+          `/rest/v1/options?select=id,question_id,ord,label,image_url,next_question_id`,
+          {
+            method: "POST",
+            headers: { Prefer: "return=representation" },
+            body: JSON.stringify(payload),
+          },
+          token
+        );
+
+        if (!ok) return json({ status: "error", detail: data }, 400);
+        return json(data);
+      }
+
+      // ✅ PATCH /api/private/option/:id { next_question_id?, label?, image_url? }
       if (request.method === "PATCH" && url.pathname.startsWith("/api/private/option/")) {
         const token = getAuthToken(request);
         if (!token) return json({ status: "unauthorized" }, 401);
@@ -219,14 +280,28 @@ if (request.method === "POST" && url.pathname === "/api/private/options2") {
         if (!id) return json({ status: "missing_id" }, 400);
 
         const body = await request.json().catch(() => null);
-        const nextQ = body?.next_question_id ?? null;
+        if (!body || typeof body !== "object") return json({ status: "bad_json" }, 400);
+
+        const patch: any = {};
+        if ("next_question_id" in body) patch.next_question_id = body.next_question_id ?? null;
+        if (typeof body.label === "string") patch.label = body.label;
+        if ("image_url" in body) patch.image_url = body.image_url ?? null;
+
+        if (Object.keys(patch).length === 0) {
+          return json({ status: "missing_patch_fields" }, 400);
+        }
 
         const { ok, data } = await supabaseRest(
           env,
-          `/rest/v1/options?id=eq.${encodeURIComponent(id)}&select=id,next_question_id`,
-          { method: "PATCH", body: JSON.stringify({ next_question_id: nextQ }) },
+          `/rest/v1/options?id=eq.${encodeURIComponent(id)}&select=id,question_id,ord,label,image_url,next_question_id`,
+          {
+            method: "PATCH",
+            headers: { Prefer: "return=representation" },
+            body: JSON.stringify(patch),
+          },
           token
         );
+
         if (!ok) return json({ status: "error", detail: data }, 400);
         return json(data?.[0] ?? data);
       }
@@ -250,7 +325,7 @@ if (request.method === "POST" && url.pathname === "/api/private/options2") {
         const upd = await supabaseRest(
           env,
           `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}&select=id,status`,
-          { method: "PATCH", body: JSON.stringify({ status: "published" }) },
+          { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ status: "published" }) },
           token
         );
         if (!upd.ok) return json({ status: "error", detail: upd.data }, 400);
@@ -267,7 +342,11 @@ if (request.method === "POST" && url.pathname === "/api/private/options2") {
           const ins = await supabaseRest(
             env,
             `/rest/v1/invites?select=code,expires_at,is_active`,
-            { method: "POST", body: JSON.stringify({ plan_id: planId, code, is_active: true, expires_at: expiresAt }) },
+            {
+              method: "POST",
+              headers: { Prefer: "return=representation" },
+              body: JSON.stringify({ plan_id: planId, code, is_active: true, expires_at: expiresAt }),
+            },
             token
           );
 
@@ -279,7 +358,6 @@ if (request.method === "POST" && url.pathname === "/api/private/options2") {
             });
           }
 
-          // si es duplicate key u otro error, reintenta unas veces
           if (attempt === 4) {
             return json({ status: "error", detail: ins.data }, 400);
           }
