@@ -246,6 +246,8 @@ function CreateCanvas({ session }: { session: Session }) {
   type QuestionRow = { id: string; plan_id: string; ord: number; title: string; subtitle: string | null };
   type OptionRow = { id: string; question_id: string; ord: number; label: string; image_url: string | null; next_question_id: string | null };
 
+  const END_NODE_ID = "__END__";
+
   // ---------- authed fetch ----------
   async function authedFetch(path: string, init?: RequestInit) {
     const token = session.access_token;
@@ -277,7 +279,7 @@ function CreateCanvas({ session }: { session: Session }) {
   const [questions, setQuestions] = React.useState<QuestionRow[]>([]);
   const [optionsByQuestion, setOptionsByQuestion] = React.useState<Record<string, OptionRow[]>>({});
 
-  // “Finaliza” explícito (porque next_question_id null es ambiguo)
+  // “Finaliza” explícito (para UI)
   const [ends, setEnds] = React.useState<Record<string, boolean>>({});
 
   // Selection
@@ -296,14 +298,19 @@ function CreateCanvas({ session }: { session: Session }) {
   const optsForSelected = selectedQid ? (optionsByQuestion[selectedQid] || []) : [];
 
   function optionIsResolved(o: OptionRow) {
-    // resuelta si: apunta a otra pregunta, o el usuario marcó “Finaliza”
-    return Boolean(o.next_question_id) || Boolean(ends[o.id]);
+    // Resuelta si:
+    // - conecta a otra pregunta
+    // - o termina (null) => FIN
+    // - o el usuario marcó ends[o.id] (UI)
+    return Boolean(o.next_question_id) || o.next_question_id === null || Boolean(ends[o.id]);
   }
 
   const canPublish =
     plan?.id &&
     questions.length > 0 &&
-    questions.every((q) => (optionsByQuestion[q.id] || []).length === 2 && (optionsByQuestion[q.id] || []).every(optionIsResolved));
+    questions.every(
+      (q) => (optionsByQuestion[q.id] || []).length === 2 && (optionsByQuestion[q.id] || []).every(optionIsResolved)
+    );
 
   // Auto-layout simple por “profundidad” calculada desde start question
   const layout = React.useMemo(() => {
@@ -313,7 +320,7 @@ function CreateCanvas({ session }: { session: Session }) {
     const depth: Record<string, number> = {};
     if (start) depth[start] = 0;
 
-    // BFS/propagación (ignora edges a null)
+    // Propagación (ignora edges a null)
     let changed = true;
     let guard = 0;
     while (changed && guard++ < 2000) {
@@ -321,9 +328,10 @@ function CreateCanvas({ session }: { session: Session }) {
       for (const q of nodes) {
         const d = depth[q.id];
         if (d == null) continue;
+
         const opts = optionsByQuestion[q.id] || [];
         for (const o of opts) {
-          if (!o.next_question_id) continue;
+          if (!o.next_question_id) continue; // null => FIN, no propagamos
           const nd = d + 1;
           const prev = depth[o.next_question_id];
           if (prev == null || nd < prev) {
@@ -333,6 +341,9 @@ function CreateCanvas({ session }: { session: Session }) {
         }
       }
     }
+
+    const depths = Object.values(depth);
+    const maxDepth = depths.length ? Math.max(...depths) : 0;
 
     // Agrupar por depth para asignar y (fila)
     const buckets: Record<number, QuestionRow[]> = {};
@@ -355,7 +366,10 @@ function CreateCanvas({ session }: { session: Session }) {
       });
     });
 
-    return { start, depth, pos, colWidth, rowHeight };
+    // Nodo FIN virtual, a la derecha de todo
+    pos[END_NODE_ID] = { x: (maxDepth + 1) * colWidth, y: 0 };
+
+    return { start, depth, pos, colWidth, rowHeight, maxDepth };
   }, [questions, optionsByQuestion, plan?.start_question_id]);
 
   // ---------- API actions ----------
@@ -410,16 +424,31 @@ function CreateCanvas({ session }: { session: Session }) {
     }
   }
 
-  async function markEnd(optionId: string) {
+  async function connectOption(fromQid: string, optionId: string, toQid: string | null) {
     setBusy(true);
     setError(null);
     try {
-      // dejamos next_question_id explícitamente en null (y marcamos end local)
       await authedFetch(`/api/private/option/${encodeURIComponent(optionId)}`, {
         method: "PATCH",
-        body: JSON.stringify({ next_question_id: null }),
+        body: JSON.stringify({ next_question_id: toQid }),
       });
-      setEnds((prev) => ({ ...prev, [optionId]: true }));
+
+      // actualizar local
+      setOptionsByQuestion((prev) => {
+        const list = prev[fromQid] || [];
+        return {
+          ...prev,
+          [fromQid]: list.map((o) => (o.id === optionId ? { ...o, next_question_id: toQid } : o)),
+        };
+      });
+
+      // UI ends: si conecto a null, marcamos FIN
+      setEnds((prev) => {
+        const copy = { ...prev };
+        if (toQid === null) copy[optionId] = true;
+        else delete copy[optionId];
+        return copy;
+      });
     } catch (e: any) {
       setError(String(e.message || e));
     } finally {
@@ -476,18 +505,18 @@ function CreateCanvas({ session }: { session: Session }) {
       setQuestions((prev) => [...prev, q]);
       setOptionsByQuestion((prev) => ({ ...prev, [q.id]: opts }));
 
-      // Esta opción ya está resuelta (no es end)
-      setEnds((prev) => {
-        const copy = { ...prev };
-        delete copy[linkFromOption.optionId];
-        return copy;
-      });
-
       // También actualizamos la opción local del “fromQid”
       setOptionsByQuestion((prev) => {
         const fromOpts = prev[linkFromOption.fromQid] || [];
         const updated = fromOpts.map((o) => (o.id === linkFromOption.optionId ? { ...o, next_question_id: q.id } : o));
         return { ...prev, [linkFromOption.fromQid]: updated };
+      });
+
+      // UI: ya no es fin
+      setEnds((prev) => {
+        const copy = { ...prev };
+        delete copy[linkFromOption.optionId];
+        return copy;
       });
 
       setSelectedQid(q.id);
@@ -535,7 +564,14 @@ function CreateCanvas({ session }: { session: Session }) {
       >
         <div className="flex items-center justify-between gap-3">
           <div className="text-xs tracking-widest text-white/60">Q{q.ord}</div>
-          <div className={"text-xs px-2 py-1 rounded-full border " + (complete ? "border-emerald-400/40 text-emerald-200 bg-emerald-500/10" : "border-yellow-400/30 text-yellow-200 bg-yellow-500/10")}>
+          <div
+            className={
+              "text-xs px-2 py-1 rounded-full border " +
+              (complete
+                ? "border-emerald-400/40 text-emerald-200 bg-emerald-500/10"
+                : "border-yellow-400/30 text-yellow-200 bg-yellow-500/10")
+            }
+          >
             {complete ? "Completa" : "Incompleta"}
           </div>
         </div>
@@ -544,23 +580,27 @@ function CreateCanvas({ session }: { session: Session }) {
         <div className="text-white/70 text-sm mt-1">{q.subtitle || ""}</div>
 
         <div className="mt-4 space-y-2">
-          {opts.slice().sort((a, b) => a.ord - b.ord).map((o) => {
-            const resolved = optionIsResolved(o);
-            const to = o.next_question_id ? `→ Q${(questions.find((x) => x.id === o.next_question_id)?.ord ?? "?")}` : (ends[o.id] ? "→ Fin" : "→ (sin definir)");
-            return (
-              <div key={o.id} className="flex items-center justify-between gap-2 text-sm">
-                <div className="text-white">{o.label}</div>
-                <div className={resolved ? "text-white/70" : "text-red-200"}>{to}</div>
-              </div>
-            );
-          })}
+          {opts
+            .slice()
+            .sort((a, b) => a.ord - b.ord)
+            .map((o) => {
+              const resolved = optionIsResolved(o);
+              const to = o.next_question_id
+                ? `→ Q${questions.find((x) => x.id === o.next_question_id)?.ord ?? "?"}`
+                : "→ FIN";
+              return (
+                <div key={o.id} className="flex items-center justify-between gap-2 text-sm">
+                  <div className="text-white">{o.label}</div>
+                  <div className={resolved ? "text-white/70" : "text-red-200"}>{to}</div>
+                </div>
+              );
+            })}
         </div>
       </button>
     );
   }
 
   function EdgesLayer() {
-    // dibuja flechas desde cada opción al destino (si existe), o a un “fin” al lado
     const paths: Array<{ d: string; key: string; unresolved?: boolean }> = [];
 
     for (const q of questions) {
@@ -571,23 +611,29 @@ function CreateCanvas({ session }: { session: Session }) {
       for (let i = 0; i < opts.length; i++) {
         const o = opts[i];
 
-        // punto de salida por opción (dos “puertos”)
-        const x1 = fromPos.x + 320; // borde derecho del nodo
+        const x1 = fromPos.x + 320;
         const y1 = fromPos.y + 140 + i * 22;
+
+        // destino: si null => FIN virtual
+        const targetId = o.next_question_id === null ? END_NODE_ID : o.next_question_id;
 
         let x2 = x1 + 120;
         let y2 = y1;
 
-        if (o.next_question_id && layout.pos[o.next_question_id]) {
-          const toPos = layout.pos[o.next_question_id];
-          x2 = toPos.x;         // borde izquierdo del nodo destino
-          y2 = toPos.y + 120;   // centro aproximado
+        if (targetId && layout.pos[targetId]) {
+          const toPos = layout.pos[targetId];
+          x2 = toPos.x;
+          y2 = toPos.y + 120;
         }
 
         const midX = (x1 + x2) / 2;
-
         const d = `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
-        paths.push({ d, key: `${o.id}`, unresolved: !optionIsResolved(o) });
+
+        paths.push({
+          d,
+          key: `${o.id}`,
+          unresolved: !optionIsResolved(o),
+        });
       }
     }
 
@@ -607,7 +653,7 @@ function CreateCanvas({ session }: { session: Session }) {
     );
   }
 
-  // Canvas size (simple): columnas * ancho + margen
+  // Canvas size
   const maxX = Math.max(0, ...Object.values(layout.pos).map((p) => p.x));
   const maxY = Math.max(0, ...Object.values(layout.pos).map((p) => p.y));
   const canvasW = maxX + 700;
@@ -670,9 +716,19 @@ function CreateCanvas({ session }: { session: Session }) {
             <div className="relative overflow-auto" style={{ height: "calc(100vh - 220px)" }}>
               <div className="relative" style={{ width: canvasW, height: canvasH, minWidth: "100%", minHeight: "100%" }}>
                 <EdgesLayer />
+
                 {questions.map((q) => (
                   <NodeCard key={q.id} q={q} />
                 ))}
+
+                {/* Nodo FIN virtual */}
+                <div
+                  style={{ transform: `translate(${layout.pos[END_NODE_ID].x}px, ${layout.pos[END_NODE_ID].y}px)` }}
+                  className="absolute w-[220px] rounded-3xl border border-white/15 bg-white/5 p-4 text-center shadow-2xl"
+                >
+                  <div className="text-xs tracking-widest text-white/60">FINAL</div>
+                  <div className="mt-2 text-2xl font-semibold">FIN</div>
+                </div>
               </div>
             </div>
           </div>
@@ -736,32 +792,67 @@ function CreateCanvas({ session }: { session: Session }) {
 
                   {(optsForSelected.slice().sort((a, b) => a.ord - b.ord)).map((o) => {
                     const resolved = optionIsResolved(o);
-                    const isEnd = Boolean(ends[o.id]);
+                    const isEnd = o.next_question_id === null;
                     return (
                       <div key={o.id} className="rounded-2xl border border-white/10 bg-black/20 p-4">
                         <div className="flex items-center justify-between gap-3">
                           <div className="font-semibold">{o.label}</div>
-                          <div className={"text-xs px-2 py-1 rounded-full border " + (resolved ? "border-emerald-400/30 text-emerald-200 bg-emerald-500/10" : "border-red-400/30 text-red-200 bg-red-500/10")}>
-                            {resolved ? (isEnd ? "Fin" : "Conectada") : "Sin definir"}
+                          <div
+                            className={
+                              "text-xs px-2 py-1 rounded-full border " +
+                              (resolved
+                                ? "border-emerald-400/30 text-emerald-200 bg-emerald-500/10"
+                                : "border-red-400/30 text-red-200 bg-red-500/10")
+                            }
+                          >
+                            {resolved ? (isEnd ? "FIN" : "Conectada") : "Sin definir"}
                           </div>
                         </div>
 
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button
-                            disabled={busy}
-                            className="rounded-2xl bg-white/10 border border-white/15 px-3 py-2 text-sm hover:bg-white/15 disabled:opacity-50"
-                            onClick={() => openCreateFromOption(selectedQid, o.id)}
-                          >
-                            Crear pregunta y conectar
-                          </button>
+                        <div className="mt-3 space-y-2">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              disabled={busy}
+                              className="rounded-2xl bg-white/10 border border-white/15 px-3 py-2 text-sm hover:bg-white/15 disabled:opacity-50"
+                              onClick={() => openCreateFromOption(selectedQid, o.id)}
+                            >
+                              Crear pregunta y conectar
+                            </button>
 
-                          <button
-                            disabled={busy}
-                            className="rounded-2xl bg-white text-slate-950 px-3 py-2 text-sm font-semibold hover:opacity-90 disabled:opacity-50"
-                            onClick={() => markEnd(o.id)}
-                          >
-                            Finaliza
-                          </button>
+                            <button
+                              disabled={busy}
+                              className="rounded-2xl bg-white text-slate-950 px-3 py-2 text-sm font-semibold hover:opacity-90 disabled:opacity-50"
+                              onClick={() => connectOption(selectedQid, o.id, null)}
+                            >
+                              Conectar a FIN
+                            </button>
+                          </div>
+
+                          <div>
+                            <div className="text-xs text-white/60 mb-1">Conectar a nodo existente</div>
+                            <select
+                              className="w-full rounded-2xl bg-white/10 border border-white/15 px-3 py-2 text-sm outline-none"
+                              disabled={busy}
+                              value={o.next_question_id ?? ""}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (!v) return;
+                                connectOption(selectedQid, o.id, v);
+                              }}
+                            >
+                              <option value="" disabled>
+                                Elegir nodo…
+                              </option>
+                              {questions
+                                .filter((q) => q.id !== selectedQid)
+                                .sort((a, b) => a.ord - b.ord)
+                                .map((q) => (
+                                  <option key={q.id} value={q.id}>
+                                    Q{q.ord} · {q.subtitle || q.title || "Sin título"}
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
                         </div>
                       </div>
                     );
@@ -838,7 +929,7 @@ function CreateCanvas({ session }: { session: Session }) {
             <div className="rounded-3xl border border-white/15 bg-white/5 p-5">
               <div className="text-sm font-semibold">Publicar</div>
               <div className="mt-2 text-sm text-white/70">
-                {canPublish ? "Listo para publicar ✅" : "Faltan conexiones (cada opción debe ir a otra pregunta o finalizar)."}
+                {canPublish ? "Listo para publicar ✅" : "Faltan conexiones (cada opción debe ir a otra pregunta o terminar en FIN)."}
               </div>
 
               <div className="mt-4 flex flex-wrap gap-2">
