@@ -1,5 +1,8 @@
 export interface Env {
   ASSETS: Fetcher;
+  SUPABASE_URL: string;
+  SUPABASE_ANON_KEY: string;
+  APP_BASE_URL: string;
 }
 
 function isValidCode(code: string) {
@@ -16,26 +19,52 @@ function redirect(to: string, status = 302) {
   });
 }
 
+async function getPlanByCode(env: Env, code: string) {
+  const res = await fetch(
+    `${env.SUPABASE_URL}/rest/v1/rpc/get_public_plan_by_code`,
+    {
+      method: "POST",
+      headers: {
+        apikey: env.SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${env.SUPABASE_ANON_KEY}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ p_code: code }),
+    }
+  );
+
+  if (!res.ok) return null;
+  return res.json();
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    // ✅ Short link: /i/:code  -> /invite/:code
+    // ✅ Short link real: /i/:code
     if (url.pathname.startsWith("/i/")) {
       const code = url.pathname.split("/").pop() || "";
+
       if (!isValidCode(code)) {
-        return redirect("/expired"); // o "/?invalid=1" si preferís
+        return redirect("/expired");
       }
-      return redirect(`/invite/${encodeURIComponent(code)}`, 302);
+
+      const data = await getPlanByCode(env, code);
+
+      if (!data || data.status !== "ok") {
+        return redirect("/expired");
+      }
+
+      return redirect(`/invite/${encodeURIComponent(code)}`);
     }
 
-    // (Después vamos a agregar /api/* acá)
+    // 🔜 API pública después: /api/public/...
 
-    // ✅ Assets (front)
+    // ✅ Assets
     const res = await env.ASSETS.fetch(request);
     if (res.status !== 404) return res;
 
-    // ✅ SPA fallback -> index.html (para /invite/ABC, /create, etc.)
+    // ✅ SPA fallback
     const indexUrl = new URL(url);
     indexUrl.pathname = "/index.html";
     return env.ASSETS.fetch(new Request(indexUrl.toString(), request));
