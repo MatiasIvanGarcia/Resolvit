@@ -1,12 +1,28 @@
+import React from "react";
+import { AnimatePresence, motion } from "framer-motion";
+
+type PublicPlan =
+  | { status: "expired" | "unpublished" | "not_found" | "invalid_code" | string; [k: string]: any }
+  | {
+      status: "ok";
+      invite: { code: string; expires_at: string | null };
+      plan: { id: string; title: string; person_name: string | null };
+      questions: Array<{
+        id: string;
+        ord: number;
+        title: string;
+        subtitle: string | null;
+        options: Array<{ id: string; ord: number; label: string; image_url: string | null }>;
+      }>;
+    };
+
 function usePath() {
   const [path, setPath] = React.useState(window.location.pathname);
-
   React.useEffect(() => {
     const onPop = () => setPath(window.location.pathname);
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
-
   return path;
 }
 
@@ -17,10 +33,10 @@ function navigate(to: string) {
 
 function Home() {
   return (
-    <div className="p-8">
+    <div className="min-h-screen bg-slate-950 text-white p-8">
       <h1 className="text-3xl font-bold">Plan Invitación</h1>
       <button
-        className="mt-4 rounded bg-black text-white px-4 py-2"
+        className="mt-4 rounded-2xl bg-white text-slate-950 px-4 py-2"
         onClick={() => navigate("/create")}
       >
         Crear un plan
@@ -30,22 +46,250 @@ function Home() {
 }
 
 function Create() {
-  return <div className="p-8">Pantalla crear plan (próximo paso)</div>;
-}
-
-function Invite() {
-  const code = window.location.pathname.split("/").pop();
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-bold">Invitación</h1>
-      <p>Código: {code}</p>
-      <p>(Acá va el flujo de decisiones)</p>
+    <div className="min-h-screen bg-slate-950 text-white p-8">
+      Pantalla crear plan (siguiente paso)
     </div>
   );
 }
 
 function Expired() {
-  return <div className="p-8">Esta invitación ya no está disponible</div>;
+  return (
+    <div className="min-h-screen bg-slate-950 text-white p-8">
+      <h1 className="text-2xl font-semibold">Esta invitación ya no está disponible</h1>
+      <p className="text-white/70 mt-2">Pedile a la persona que te comparta un link nuevo.</p>
+      <button className="mt-4 rounded-2xl bg-white text-slate-950 px-4 py-2" onClick={() => navigate("/")}>
+        Volver
+      </button>
+    </div>
+  );
+}
+
+const fadeSlide = {
+  initial: { opacity: 0, y: 16, filter: "blur(6px)" },
+  animate: { opacity: 1, y: 0, filter: "blur(0px)" },
+  exit: { opacity: 0, y: -10, filter: "blur(6px)" },
+};
+
+function OptionCard({
+  label,
+  imageUrl,
+  onPick,
+  disabled,
+}: {
+  label: string;
+  imageUrl?: string | null;
+  onPick: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <motion.button
+      type="button"
+      disabled={disabled}
+      onClick={onPick}
+      whileHover={disabled ? {} : { scale: 1.02 }}
+      whileTap={disabled ? {} : { scale: 0.99 }}
+      className={
+        "relative h-[42vh] md:h-[52vh] w-full overflow-hidden rounded-3xl border border-white/15 shadow-2xl " +
+        "bg-white/5 backdrop-blur-md focus:outline-none focus:ring-2 focus:ring-white/60 " +
+        (disabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer")
+      }
+    >
+      {imageUrl ? (
+        <img src={imageUrl} alt={label} className="absolute inset-0 h-full w-full object-cover" loading="lazy" />
+      ) : (
+        <div className="absolute inset-0 bg-white/10" />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-black/10" />
+      <div className="absolute left-5 right-5 bottom-5">
+        <div className="text-sm text-white/70">Elegí</div>
+        <div className="text-2xl md:text-3xl font-semibold text-white">{label}</div>
+      </div>
+    </motion.button>
+  );
+}
+
+function Invite() {
+  const code = window.location.pathname.split("/").pop() || "";
+  const [plan, setPlan] = React.useState<PublicPlan | null>(null);
+  const [loading, setLoading] = React.useState(true);
+
+  const [idx, setIdx] = React.useState(0);
+  const [busy, setBusy] = React.useState(false);
+  const [answers, setAnswers] = React.useState<Record<string, string>>({});
+  const [result, setResult] = React.useState<{ invitation_text?: string } | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        const res = await fetch(`/api/public/plan/${encodeURIComponent(code)}`);
+        const data = (await res.json()) as PublicPlan;
+        if (!cancelled) setPlan(data);
+      } catch {
+        if (!cancelled) setPlan({ status: "error" });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [code]);
+
+  function restart() {
+    setIdx(0);
+    setBusy(false);
+    setAnswers({});
+    setResult(null);
+  }
+
+  async function finalize() {
+    const res = await fetch(`/api/public/submit/${encodeURIComponent(code)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ answers }),
+    });
+    const data = await res.json();
+    setResult(data);
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white p-8">
+        Cargando…
+      </div>
+    );
+  }
+
+  if (!plan || plan.status !== "ok") {
+    // expired/unpublished/not_found/error -> lo mandamos a expired (más simple)
+    navigate("/expired");
+    return null;
+  }
+
+  const total = plan.questions.length;
+  const done = idx >= total;
+  const q = plan.questions[idx];
+
+  async function pick(optionId: string) {
+    if (busy) return;
+    setBusy(true);
+
+    setAnswers((prev) => ({ ...prev, [q.id]: optionId }));
+
+    // animación + avanzar
+    window.setTimeout(async () => {
+      const next = idx + 1;
+      setIdx(next);
+      setBusy(false);
+
+      if (next >= total) {
+        await finalize();
+      }
+    }, 220);
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-white">
+      <div className="mx-auto max-w-6xl px-5 py-7 md:py-10">
+        <header className="flex items-center justify-between gap-4">
+          <div>
+            <div className="text-xs tracking-widest text-white/60">INVITACIÓN</div>
+            <div className="text-lg md:text-xl font-semibold">
+              {plan.plan.person_name ? `Plan para ${plan.plan.person_name}` : plan.plan.title}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
+              onClick={restart}
+            >
+              Reiniciar
+            </button>
+          </div>
+        </header>
+
+        <main className="mt-7">
+          <AnimatePresence mode="wait">
+            {!done ? (
+              <motion.section
+                key={q.id}
+                {...fadeSlide}
+                transition={{ duration: 0.35, ease: "easeOut" }}
+                className="space-y-5"
+              >
+                <div className="space-y-1">
+                  <div className="text-3xl md:text-5xl font-semibold leading-tight">
+                    {q.title || "¿Qué preferís?"}
+                  </div>
+                  <div className="text-white/70 text-base md:text-lg">
+                    {q.subtitle || ""}
+                  </div>
+                  <div className="text-xs text-white/60 mt-1">
+                    {idx + 1} / {total}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {q.options.slice(0, 2).map((o) => (
+                    <OptionCard
+                      key={o.id}
+                      label={o.label}
+                      imageUrl={o.image_url}
+                      disabled={busy}
+                      onPick={() => pick(o.id)}
+                    />
+                  ))}
+                </div>
+              </motion.section>
+            ) : (
+              <motion.section
+                key="result"
+                {...fadeSlide}
+                transition={{ duration: 0.35, ease: "easeOut" }}
+                className="space-y-5"
+              >
+                <div className="space-y-2">
+                  <div className="text-3xl md:text-5xl font-semibold leading-tight">Listo 😄</div>
+                  <div className="text-white/70 text-base md:text-lg">
+                    Acá está tu invitación final.
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-white/15 bg-white/5 p-5 md:p-7 shadow-2xl">
+                  <pre className="whitespace-pre-wrap text-base md:text-lg leading-relaxed text-white/90">
+                    {result?.invitation_text || "Generando…"}
+                  </pre>
+
+                  <div className="mt-5 flex flex-wrap gap-3">
+                    <button
+                      className="rounded-2xl bg-white text-slate-950 px-4 py-2 text-sm hover:opacity-90"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(result?.invitation_text || "");
+                        alert("Copiado ✅");
+                      }}
+                      disabled={!result?.invitation_text}
+                    >
+                      Copiar invitación
+                    </button>
+                    <button
+                      className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
+                      onClick={restart}
+                    >
+                      Volver a elegir
+                    </button>
+                  </div>
+                </div>
+              </motion.section>
+            )}
+          </AnimatePresence>
+        </main>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -54,6 +298,5 @@ export default function App() {
   if (path.startsWith("/invite/")) return <Invite />;
   if (path === "/create") return <Create />;
   if (path === "/expired") return <Expired />;
-
   return <Home />;
 }
