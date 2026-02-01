@@ -165,7 +165,7 @@ export default {
         const { ok, data } = await supabaseRest(
           env,
           `/rest/v1/questions?select=id,plan_id,ord,title,subtitle`,
-          { method: "POST", body: JSON.stringify(payload) },
+          { method: "POST", headers: {Prefer: "return=representation"}, body: JSON.stringify(payload) },
           token
         );
         if (!ok) return json({ status: "error", detail: data }, 400);
@@ -202,7 +202,7 @@ export default {
         const { ok, data } = await supabaseRest(
           env,
           `/rest/v1/options?select=id,question_id,ord,label,image_url,next_question_id`,
-          { method: "POST", body: JSON.stringify(rows) },
+          { method: "POST", headers: {Prefer: "return=representation"}, body: JSON.stringify(payload) },
           token
         );
         if (!ok) return json({ status: "error", detail: data }, 400);
