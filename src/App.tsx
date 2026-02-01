@@ -6,13 +6,24 @@ type PublicPlan =
   | {
       status: "ok";
       invite: { code: string; expires_at: string | null };
-      plan: { id: string; title: string; person_name: string | null };
+      plan: {
+        id: string;
+        title: string;
+        person_name: string | null;
+        start_question_id: string | null;
+      };
       questions: Array<{
         id: string;
         ord: number;
         title: string;
         subtitle: string | null;
-        options: Array<{ id: string; ord: number; label: string; image_url: string | null }>;
+        options: Array<{
+          id: string;
+          ord: number;
+          label: string;
+          image_url: string | null;
+          next_question_id: string | null;
+        }>;
       }>;
     };
 
@@ -58,7 +69,10 @@ function Expired() {
     <div className="min-h-screen bg-slate-950 text-white p-8">
       <h1 className="text-2xl font-semibold">Esta invitación ya no está disponible</h1>
       <p className="text-white/70 mt-2">Pedile a la persona que te comparta un link nuevo.</p>
-      <button className="mt-4 rounded-2xl bg-white text-slate-950 px-4 py-2" onClick={() => navigate("/")}>
+      <button
+        className="mt-4 rounded-2xl bg-white text-slate-950 px-4 py-2"
+        onClick={() => navigate("/")}
+      >
         Volver
       </button>
     </div>
@@ -114,10 +128,21 @@ function Invite() {
   const [plan, setPlan] = React.useState<PublicPlan | null>(null);
   const [loading, setLoading] = React.useState(true);
 
-  const [idx, setIdx] = React.useState(0);
+  const [currentQuestionId, setCurrentQuestionId] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [answers, setAnswers] = React.useState<Record<string, string>>({});
   const [result, setResult] = React.useState<{ invitation_text?: string } | null>(null);
+
+  // Cache start id so restart() can work even if currentQuestionId becomes null at the end
+  const startQuestionId = React.useMemo(() => {
+    if (!plan || plan.status !== "ok") return null;
+    return plan.plan.start_question_id;
+  }, [plan]);
+
+  const questionById = React.useMemo(() => {
+    if (!plan || plan.status !== "ok") return new Map<string, (typeof plan.questions)[number]>();
+    return new Map(plan.questions.map((q) => [q.id, q]));
+  }, [plan]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -138,11 +163,18 @@ function Invite() {
     };
   }, [code]);
 
+  // Set initial question once plan is loaded
+  React.useEffect(() => {
+    if (plan && plan.status === "ok") {
+      setCurrentQuestionId(plan.plan.start_question_id);
+    }
+  }, [plan]);
+
   function restart() {
-    setIdx(0);
     setBusy(false);
     setAnswers({});
     setResult(null);
+    setCurrentQuestionId(startQuestionId);
   }
 
   async function finalize() {
@@ -156,36 +188,50 @@ function Invite() {
   }
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-white p-8">
-        Cargando…
-      </div>
-    );
+    return <div className="min-h-screen bg-slate-950 text-white p-8">Cargando…</div>;
   }
 
   if (!plan || plan.status !== "ok") {
-    // expired/unpublished/not_found/error -> lo mandamos a expired (más simple)
     navigate("/expired");
     return null;
   }
 
-  const total = plan.questions.length;
-  const done = idx >= total;
-  const q = plan.questions[idx];
+  // If start_question_id is null, the plan is misconfigured
+  if (!startQuestionId) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white p-8">
+        <h1 className="text-2xl font-semibold">Plan inválido</h1>
+        <p className="text-white/70 mt-2">No tiene pregunta de inicio configurada.</p>
+        <button className="mt-4 rounded-2xl bg-white text-slate-950 px-4 py-2" onClick={() => navigate("/")}>
+          Volver
+        </button>
+      </div>
+    );
+  }
 
-  async function pick(optionId: string) {
-    if (busy) return;
+  const done = currentQuestionId === null;
+  const q = currentQuestionId ? questionById.get(currentQuestionId) : null;
+
+  // Progreso: cantidad de respuestas hechas (en branching no siempre recorre todas las questions del plan)
+  const answeredCount = Object.keys(answers).length;
+  const totalPossible = plan.questions.length;
+
+  async function pick(option: { id: string; next_question_id: string | null }) {
+    if (!q || busy) return;
     setBusy(true);
 
-    setAnswers((prev) => ({ ...prev, [q.id]: optionId }));
+    // 1) Guardar respuesta para la pregunta actual
+    setAnswers((prev) => ({ ...prev, [q.id]: option.id }));
 
-    // animación + avanzar
+    // 2) Animación + avanzar por branching
     window.setTimeout(async () => {
-      const next = idx + 1;
-      setIdx(next);
       setBusy(false);
 
-      if (next >= total) {
+      if (option.next_question_id) {
+        setCurrentQuestionId(option.next_question_id);
+      } else {
+        // Opción A: null => termina el flujo
+        setCurrentQuestionId(null);
         await finalize();
       }
     }, 220);
@@ -214,7 +260,7 @@ function Invite() {
 
         <main className="mt-7">
           <AnimatePresence mode="wait">
-            {!done ? (
+            {!done && q ? (
               <motion.section
                 key={q.id}
                 {...fadeSlide}
@@ -225,11 +271,9 @@ function Invite() {
                   <div className="text-3xl md:text-5xl font-semibold leading-tight">
                     {q.title || "¿Qué preferís?"}
                   </div>
-                  <div className="text-white/70 text-base md:text-lg">
-                    {q.subtitle || ""}
-                  </div>
+                  <div className="text-white/70 text-base md:text-lg">{q.subtitle || ""}</div>
                   <div className="text-xs text-white/60 mt-1">
-                    {idx + 1} / {total}
+                    {answeredCount + 1} / {totalPossible}
                   </div>
                 </div>
 
@@ -240,7 +284,7 @@ function Invite() {
                       label={o.label}
                       imageUrl={o.image_url}
                       disabled={busy}
-                      onPick={() => pick(o.id)}
+                      onPick={() => pick({ id: o.id, next_question_id: o.next_question_id })}
                     />
                   ))}
                 </div>
@@ -254,9 +298,7 @@ function Invite() {
               >
                 <div className="space-y-2">
                   <div className="text-3xl md:text-5xl font-semibold leading-tight">Listo 😄</div>
-                  <div className="text-white/70 text-base md:text-lg">
-                    Acá está tu invitación final.
-                  </div>
+                  <div className="text-white/70 text-base md:text-lg">Acá está tu invitación final.</div>
                 </div>
 
                 <div className="rounded-3xl border border-white/15 bg-white/5 p-5 md:p-7 shadow-2xl">
