@@ -1,0 +1,8 @@
+{
+  "name": "plan-invitacion",
+  "compatibility_date": "2026-02-01",
+  "main": "worker/worker.ts",
+  "assets": {
+    "directory": "./dist"
+  }
+}
