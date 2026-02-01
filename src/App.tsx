@@ -264,6 +264,11 @@ function Create({ session }: { session: Session }) {
 
   // -------- state ----------
   type Step = "meta" | "q" | "branch" | "publish";
+  const [resolvedOptionIds, setResolvedOptionIds] = React.useState<Record<string, boolean>>({});
+  
+  function nextPendingOption(opts: Array<{ id: string; label: string }>, resolved: Record<string, boolean>) {
+    return opts.find((o) => !resolved[o.id]) ?? null;
+  }
 
   const [step, setStep] = React.useState<Step>("meta");
   const [busy, setBusy] = React.useState(false);
@@ -373,8 +378,9 @@ function Create({ session }: { session: Session }) {
       setSavedOptions(opts);
 
       // 3) arrancamos resolución de branching con la opción ord=1
-      const first = opts.find((o: any) => o.ord === 1) || opts[0];
-      setPendingEdge({ optionId: first.id, optionLabel: first.label });
+      setResolvedOptionIds({});
+      const first = nextPendingOption(opts, {});
+      setPendingEdge(first ? { optionId: first.id, optionLabel: first.label } : null);
 
       setStep("branch");
       setNextOrd((x) => x + 1);
@@ -390,41 +396,45 @@ function Create({ session }: { session: Session }) {
     }
   }
 
-  async function setOptionNext(optionId: string, nextQuestionId: string | null, optionLabel: string) {
-    if (!questionId) return;
-    setError(null);
-    setBusy(true);
-    try {
-      await authedFetch(`/api/private/option/${encodeURIComponent(optionId)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ next_question_id: nextQuestionId }),
-      });
+async function setOptionNext(optionId: string, nextQuestionId: string | null, optionLabel: string) {
+  if (!questionId) return;
+  setError(null);
+  setBusy(true);
+  try {
+    await authedFetch(`/api/private/option/${encodeURIComponent(optionId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ next_question_id: nextQuestionId }),
+    });
 
-      // guardar edge local para preview
-      setEdges((prev) => [
-        ...prev,
-        { fromQuestionId: questionId, optionLabel, toQuestionId: nextQuestionId },
-      ]);
+    // guardar edge local para preview
+    setEdges((prev) => [
+      ...prev,
+      { fromQuestionId: questionId, optionLabel, toQuestionId: nextQuestionId },
+    ]);
 
-      // mover al próximo “pending edge” (la otra opción de esta pregunta)
-      const remaining = savedOptions
-        .filter((o) => o.id !== optionId)
-        .sort((a, b) => a.ord - b.ord);
+    // ✅ marcar resuelta
+    setResolvedOptionIds((prev) => {
+      const updated = { ...prev, [optionId]: true };
 
-      if (remaining.length > 0) {
-        const nextOpt = remaining[0];
-        setPendingEdge({ optionId: nextOpt.id, optionLabel: nextOpt.label });
+      // elegir la próxima pendiente de ESTA pregunta
+      const nxt = nextPendingOption(savedOptions as any, updated);
+
+      if (nxt) {
+        setPendingEdge({ optionId: nxt.id, optionLabel: nxt.label });
+        setStep("branch");
       } else {
-        // ya resolvimos ambas opciones: vamos a publicar o seguir si el usuario crea nuevas preguntas encadenadas
         setPendingEdge(null);
         setStep("publish");
       }
-    } catch (e: any) {
-      setError(String(e.message || e));
-    } finally {
-      setBusy(false);
-    }
+
+      return updated;
+    });
+  } catch (e: any) {
+    setError(String(e.message || e));
+  } finally {
+    setBusy(false);
   }
+}
 
   async function createNextQuestionForPendingEdge() {
     // Creamos una nueva pregunta (ord = nextOrd actual) y linkeamos la opción pendiente hacia esa pregunta
