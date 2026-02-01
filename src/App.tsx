@@ -102,11 +102,10 @@ function Home({ session }: { session: Session | null }) {
       <main className="mx-auto max-w-6xl px-6 py-14">
         <div className="max-w-2xl space-y-5">
           <h1 className="text-4xl md:text-6xl font-semibold leading-tight">
-            Creá invitaciones interactivas para armar planes en segundos.
+            Creá invitaciones interactivas para armar planes.
           </h1>
           <p className="text-white/70 text-lg">
-            Armás preguntas con dos opciones (con fotos) y el link permite que la otra persona elija.
-            Con branching podés crear árboles de decisión (Día/Noche → Merienda/Cena, etc).
+            Armás preguntas con dos opciones (con fotos), con branching para decisiones complejas.
           </p>
 
           <div className="flex flex-wrap gap-3 pt-2">
@@ -114,7 +113,7 @@ function Home({ session }: { session: Session | null }) {
               className="rounded-2xl bg-white text-slate-950 px-5 py-3 text-sm font-semibold hover:opacity-90"
               onClick={() => navigate(session ? "/create" : "/login")}
             >
-              {session ? "Crear mi primer plan" : "Empezar"}
+              Empezar
             </button>
             <button
               className="rounded-2xl bg-white/10 border border-white/15 px-5 py-3 text-sm hover:bg-white/15"
@@ -130,26 +129,45 @@ function Home({ session }: { session: Session | null }) {
 }
 
 function Login() {
+  const [mode, setMode] = React.useState<"login" | "signup">("login");
   const [email, setEmail] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [confirm, setConfirm] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const [sent, setSent] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
+  const [msg, setMsg] = React.useState<string | null>(null);
 
-  async function sendLink() {
+  async function submit() {
+    setMsg(null);
+
+    if (mode === "signup") {
+      if (password.length < 6) {
+        setMsg("La contraseña debe tener al menos 6 caracteres.");
+        return;
+      }
+      if (password !== confirm) {
+        setMsg("Las contraseñas no coinciden.");
+        return;
+      }
+    }
+
     setBusy(true);
-    setError(null);
-
-    const redirectTo = `${window.location.origin}/create`;
-
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: redirectTo },
-    });
-
-    setBusy(false);
-
-    if (error) setError(error.message);
-    else setSent(true);
+    try {
+      if (mode === "login") {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) setMsg(error.message);
+        else navigate("/create");
+      } else {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) setMsg(error.message);
+        else {
+          // Si desactivaste confirm email en Supabase, esto ya te deja logueado (o al menos el usuario activo).
+          // Si por alguna razón no devuelve sesión, mandamos a login.
+          navigate("/create");
+        }
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -162,34 +180,57 @@ function Login() {
 
       <main className="mx-auto max-w-6xl px-6 py-14">
         <div className="max-w-md space-y-4">
-          <h1 className="text-3xl font-semibold">Iniciar sesión</h1>
-          <p className="text-white/70">
-            Te mandamos un link por mail. Hacés click y entrás sin contraseña.
-          </p>
+          <h1 className="text-3xl font-semibold">
+            {mode === "login" ? "Iniciar sesión" : "Crear cuenta"}
+          </h1>
 
-          <input
-            className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-            placeholder="tu@email.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-          />
+          <div className="space-y-2">
+            <input
+              className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+              placeholder="tu@email.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+            />
+            <input
+              className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+              placeholder="Contraseña"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              type="password"
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+            />
+            {mode === "signup" && (
+              <input
+                className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+                placeholder="Confirmar contraseña"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                type="password"
+                autoComplete="new-password"
+              />
+            )}
+          </div>
 
-          {error && <div className="text-red-300 text-sm">{error}</div>}
+          {msg && <div className="text-red-300 text-sm">{msg}</div>}
 
           <button
-            disabled={busy || !email}
-            onClick={sendLink}
+            disabled={busy || !email || !password || (mode === "signup" && !confirm)}
+            onClick={submit}
             className="w-full rounded-2xl bg-white text-slate-950 px-4 py-3 font-semibold disabled:opacity-50"
           >
-            {busy ? "Enviando…" : "Enviar magic link"}
+            {busy ? "..." : mode === "login" ? "Entrar" : "Registrarme"}
           </button>
 
-          {sent && (
-            <div className="rounded-2xl border border-white/15 bg-white/5 p-4 text-white/80 text-sm">
-              Listo ✅ Revisá tu mail y hacé click en el link para entrar.
-            </div>
-          )}
+          <button
+            className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3"
+            onClick={() => {
+              setMsg(null);
+              setMode(mode === "login" ? "signup" : "login");
+            }}
+          >
+            {mode === "login" ? "No tengo cuenta" : "Ya tengo cuenta"}
+          </button>
 
           <button className="w-full text-white/70 text-sm underline" onClick={() => navigate("/")}>
             Volver
@@ -203,12 +244,11 @@ function Login() {
 
 function Create({ session }: { session: Session }) {
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      <header className="mx-auto max-w-6xl px-6 py-6 flex items-center justify-between">
+    <div className="min-h-screen bg-slate-950 text-white p-8">
+      <div className="flex items-center justify-between">
         <button className="text-lg font-semibold" onClick={() => navigate("/")}>
           Plan Invitación
         </button>
-
         <div className="flex items-center gap-3">
           <div className="text-sm text-white/70">{session.user.email}</div>
           <button
@@ -221,13 +261,11 @@ function Create({ session }: { session: Session }) {
             Cerrar sesión
           </button>
         </div>
-      </header>
+      </div>
 
-      <main className="mx-auto max-w-6xl px-6 py-10">
-        <div className="rounded-3xl border border-white/15 bg-white/5 p-6">
-          Builder /create (siguiente paso): wizard para crear preguntas + branching.
-        </div>
-      </main>
+      <div className="mt-6 rounded-3xl border border-white/15 bg-white/5 p-6">
+        Builder /create (siguiente paso)
+      </div>
     </div>
   );
 }
@@ -508,6 +546,7 @@ export default function App() {
   const session = useSession();
 
   if (path.startsWith("/invite/")) return <Invite />;
+  if (path === "/expired") return <Expired />;
 
   if (path === "/login") return <Login />;
 
@@ -518,8 +557,6 @@ export default function App() {
     }
     return <Create session={session} />;
   }
-
-  if (path === "/expired") return <Expired />;
 
   return <Home session={session} />;
 }
