@@ -321,14 +321,14 @@ function CreateLinear({ session }: { session: Session }) {
         }),
       });
 
-      const opts: OptionRow[] = await authedFetch("/api/private/options2", {
-        method: "POST",
-        body: JSON.stringify({
-          question_id: q.id,
-          a: { label: "", image_url: null },
-          b: { label: "", image_url: null },
-        }),
-      });
+const opts: OptionRow[] = await authedFetch("/api/private/options2", {
+  method: "POST",
+  body: JSON.stringify({
+    question_id: q.id,
+    a: { label: "Opción 1", image_url: null },
+    b: { label: "Opción 2", image_url: null },
+  }),
+});
 
       setQuestions((prev) => [...prev, q]);
       setOptionsByQuestion((prev) => ({ ...prev, [q.id]: opts }));
