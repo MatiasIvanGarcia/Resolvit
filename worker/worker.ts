@@ -1,5 +1,5 @@
 export interface Env {
-  ASSETS?: Fetcher; // 👈 opcional a propósito (para no crashear)
+  ASSETS?: Fetcher; // opcional para no crashear
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
 }
@@ -36,6 +36,28 @@ function redirect(to: string, status = 302) {
   });
 }
 
+function escapeHtml(s: string) {
+  return s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function getAuthToken(req: Request) {
+  const h = req.headers.get("authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m?.[1] || null;
+}
+
+function randCode(len = 7) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // sin confusos
+  let out = "";
+  for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
+
 async function supabaseRpc(env: Env, fn: string, body: any) {
   const res = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/${fn}`, {
     method: "POST",
@@ -46,6 +68,28 @@ async function supabaseRpc(env: Env, fn: string, body: any) {
     },
     body: JSON.stringify(body),
   });
+
+  const text = await res.text();
+  let data: any = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+
+  return { ok: res.ok, status: res.status, data };
+}
+
+// REST proxy (con token de usuario para que aplique RLS)
+async function supabaseRest(env: Env, path: string, init: RequestInit, userToken?: string) {
+  const headers: Record<string, string> = {
+    apikey: env.SUPABASE_ANON_KEY,
+    "content-type": "application/json",
+    ...(init.headers as any),
+  };
+  if (userToken) headers.Authorization = `Bearer ${userToken}`;
+
+  const res = await fetch(`${env.SUPABASE_URL}${path}`, { ...init, headers });
 
   const text = await res.text();
   let data: any = null;
@@ -71,6 +115,174 @@ export default {
           hasSupabaseUrl: Boolean(env.SUPABASE_URL),
           hasAnonKey: Boolean(env.SUPABASE_ANON_KEY),
         });
+      }
+
+      // =========================
+      // API privada (builder) - requiere login
+      // =========================
+
+      // POST /api/private/plan { title, person_name }
+      if (request.method === "POST" && url.pathname === "/api/private/plan") {
+        const token = getAuthToken(request);
+        if (!token) return json({ status: "unauthorized" }, 401);
+
+        const body = await request.json().catch(() => null);
+        if (!body?.title) return json({ status: "missing_title" }, 400);
+
+        // Si tu tabla plans requiere owner_id NOT NULL y no tiene trigger,
+        // esto puede fallar. En ese caso, te paso el trigger owner_id=auth.uid().
+        const payload = {
+          title: body.title,
+          person_name: body.person_name ?? null,
+          status: "draft",
+        };
+
+        const { ok, data } = await supabaseRest(
+          env,
+          `/rest/v1/plans?select=id,title,person_name,status,start_question_id`,
+          { method: "POST", body: JSON.stringify(payload) },
+          token
+        );
+        if (!ok) return json({ status: "error", detail: data }, 400);
+        return json(data?.[0] ?? data);
+      }
+
+      // POST /api/private/question { plan_id, ord, title, subtitle }
+      if (request.method === "POST" && url.pathname === "/api/private/question") {
+        const token = getAuthToken(request);
+        if (!token) return json({ status: "unauthorized" }, 401);
+
+        const body = await request.json().catch(() => null);
+        if (!body?.plan_id || !body?.ord) return json({ status: "missing_fields" }, 400);
+
+        const payload = {
+          plan_id: body.plan_id,
+          ord: body.ord,
+          title: body.title ?? "¿Qué preferís?",
+          subtitle: body.subtitle ?? null,
+        };
+
+        const { ok, data } = await supabaseRest(
+          env,
+          `/rest/v1/questions?select=id,plan_id,ord,title,subtitle`,
+          { method: "POST", body: JSON.stringify(payload) },
+          token
+        );
+        if (!ok) return json({ status: "error", detail: data }, 400);
+        return json(data?.[0] ?? data);
+      }
+
+      // POST /api/private/options2 { question_id, a:{label,image_url,next_question_id?}, b:{...} }
+      if (request.method === "POST" && url.pathname === "/api/private/options2") {
+        const token = getAuthToken(request);
+        if (!token) return json({ status: "unauthorized" }, 401);
+
+        const body = await request.json().catch(() => null);
+        if (!body?.question_id || !body?.a?.label || !body?.b?.label) {
+          return json({ status: "missing_fields" }, 400);
+        }
+
+        const rows = [
+          {
+            question_id: body.question_id,
+            ord: 1,
+            label: body.a.label,
+            image_url: body.a.image_url ?? null,
+            next_question_id: body.a.next_question_id ?? null,
+          },
+          {
+            question_id: body.question_id,
+            ord: 2,
+            label: body.b.label,
+            image_url: body.b.image_url ?? null,
+            next_question_id: body.b.next_question_id ?? null,
+          },
+        ];
+
+        const { ok, data } = await supabaseRest(
+          env,
+          `/rest/v1/options?select=id,question_id,ord,label,image_url,next_question_id`,
+          { method: "POST", body: JSON.stringify(rows) },
+          token
+        );
+        if (!ok) return json({ status: "error", detail: data }, 400);
+        return json(data);
+      }
+
+      // PATCH /api/private/option/:id { next_question_id }
+      if (request.method === "PATCH" && url.pathname.startsWith("/api/private/option/")) {
+        const token = getAuthToken(request);
+        if (!token) return json({ status: "unauthorized" }, 401);
+
+        const id = url.pathname.split("/").pop() || "";
+        if (!id) return json({ status: "missing_id" }, 400);
+
+        const body = await request.json().catch(() => null);
+        const nextQ = body?.next_question_id ?? null;
+
+        const { ok, data } = await supabaseRest(
+          env,
+          `/rest/v1/options?id=eq.${encodeURIComponent(id)}&select=id,next_question_id`,
+          { method: "PATCH", body: JSON.stringify({ next_question_id: nextQ }) },
+          token
+        );
+        if (!ok) return json({ status: "error", detail: data }, 400);
+        return json(data?.[0] ?? data);
+      }
+
+      // PATCH /api/private/plan/:id/publish { expires_in_hours? }
+      if (
+        request.method === "PATCH" &&
+        url.pathname.startsWith("/api/private/plan/") &&
+        url.pathname.endsWith("/publish")
+      ) {
+        const token = getAuthToken(request);
+        if (!token) return json({ status: "unauthorized" }, 401);
+
+        const parts = url.pathname.split("/");
+        const planId = parts[4]; // /api/private/plan/:id/publish
+        if (!planId) return json({ status: "missing_plan_id" }, 400);
+
+        const body = await request.json().catch(() => ({}));
+
+        // 1) publicar plan
+        const upd = await supabaseRest(
+          env,
+          `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}&select=id,status`,
+          { method: "PATCH", body: JSON.stringify({ status: "published" }) },
+          token
+        );
+        if (!upd.ok) return json({ status: "error", detail: upd.data }, 400);
+
+        // 2) crear invite (retry básico si justo colisiona el code)
+        const expiresAt =
+          typeof body?.expires_in_hours === "number"
+            ? new Date(Date.now() + body.expires_in_hours * 3600_000).toISOString()
+            : null;
+
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const code = randCode(7);
+
+          const ins = await supabaseRest(
+            env,
+            `/rest/v1/invites?select=code,expires_at,is_active`,
+            { method: "POST", body: JSON.stringify({ plan_id: planId, code, is_active: true, expires_at: expiresAt }) },
+            token
+          );
+
+          if (ins.ok) {
+            return json({
+              status: "ok",
+              invite: ins.data?.[0] ?? ins.data,
+              share_url: `/i/${code}`,
+            });
+          }
+
+          // si es duplicate key u otro error, reintenta unas veces
+          if (attempt === 4) {
+            return json({ status: "error", detail: ins.data }, 400);
+          }
+        }
       }
 
       // =========================
@@ -131,7 +343,6 @@ export default {
       // Assets + SPA fallback
       // =========================
       if (!env.ASSETS) {
-        // 👇 en vez de crashear y mostrar 1101, devolvemos un error entendible
         return html(
           `<h1>Worker error: ASSETS binding missing</h1>
            <p>El Worker no tiene disponible env.ASSETS. Revisá wrangler.jsonc (assets.directory) y el deploy.</p>
@@ -148,21 +359,8 @@ export default {
       indexUrl.pathname = "/index.html";
       return env.ASSETS.fetch(new Request(indexUrl.toString(), request));
     } catch (err: any) {
-      // 👇 evita Error 1101: devolvemos HTML con detalle
-      const msg = (err && (err.stack || err.message)) ? String(err.stack || err.message) : String(err);
-      return html(
-        `<h1>Worker exception</h1><pre style="white-space:pre-wrap">${escapeHtml(msg)}</pre>`,
-        500
-      );
+      const msg = err && (err.stack || err.message) ? String(err.stack || err.message) : String(err);
+      return html(`<h1>Worker exception</h1><pre style="white-space:pre-wrap">${escapeHtml(msg)}</pre>`, 500);
     }
   },
 };
-
-function escapeHtml(s: string) {
-  return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
