@@ -242,11 +242,22 @@ function Login() {
 }
 
 function CreateCanvas({ session }: { session: Session }) {
-  type PlanRow = { id: string; title: string; person_name: string | null; status: string; start_question_id: string | null };
+  type PlanRow = {
+    id: string;
+    title: string;
+    person_name: string | null;
+    status: string;
+    start_question_id: string | null;
+  };
   type QuestionRow = { id: string; plan_id: string; ord: number; title: string; subtitle: string | null };
-  type OptionRow = { id: string; question_id: string; ord: number; label: string; image_url: string | null; next_question_id: string | null };
-
-  const END_NODE_ID = "__END__";
+  type OptionRow = {
+    id: string;
+    question_id: string;
+    ord: number;
+    label: string;
+    image_url: string | null;
+    next_question_id: string | null;
+  };
 
   // ---------- authed fetch ----------
   async function authedFetch(path: string, init?: RequestInit) {
@@ -270,68 +281,116 @@ function CreateCanvas({ session }: { session: Session }) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // Plan meta
   const [plan, setPlan] = React.useState<PlanRow | null>(null);
   const [title, setTitle] = React.useState("");
   const [personName, setPersonName] = React.useState("");
 
-  // Graph data
   const [questions, setQuestions] = React.useState<QuestionRow[]>([]);
   const [optionsByQuestion, setOptionsByQuestion] = React.useState<Record<string, OptionRow[]>>({});
 
-  // “Finaliza” explícito (para UI)
-  const [ends, setEnds] = React.useState<Record<string, boolean>>({});
-
-  // Selection
   const [selectedQid, setSelectedQid] = React.useState<string | null>(null);
+  const [shareUrl, setShareUrl] = React.useState<string | null>(null);
 
-  // Modal/inline create question from an option
-  const [linkFromOption, setLinkFromOption] = React.useState<{ optionId: string; fromQid: string } | null>(null);
-  const [newQTitle, setNewQTitle] = React.useState("¿Qué preferís?");
-  const [newQSubtitle, setNewQSubtitle] = React.useState("");
+  // Modal crear nueva pregunta y conectar
+  const [linkFrom, setLinkFrom] = React.useState<{ fromQid: string; optionId: string } | null>(null);
+  const [newSubtitle, setNewSubtitle] = React.useState("");
   const [newA, setNewA] = React.useState({ label: "", image_url: "" });
   const [newB, setNewB] = React.useState({ label: "", image_url: "" });
 
-  const [shareUrl, setShareUrl] = React.useState<string | null>(null);
+  const selectedQ = selectedQid ? questions.find((q) => q.id === selectedQid) : null;
+  const selectedOpts = selectedQid ? (optionsByQuestion[selectedQid] || []).slice().sort((a, b) => a.ord - b.ord) : [];
 
-  // ---------- helpers ----------
-  const optsForSelected = selectedQid ? (optionsByQuestion[selectedQid] || []) : [];
-
-  function optionIsResolved(o: OptionRow) {
-    // Resuelta si:
-    // - conecta a otra pregunta
-    // - o termina (null) => FIN
-    // - o el usuario marcó ends[o.id] (UI)
-    return Boolean(o.next_question_id) || o.next_question_id === null || Boolean(ends[o.id]);
+  // ---------- derived helpers ----------
+  function getOpts(qid: string) {
+    return (optionsByQuestion[qid] || []).slice().sort((a, b) => a.ord - b.ord);
   }
 
-  const canPublish =
-    plan?.id &&
-    questions.length > 0 &&
-    questions.every(
-      (q) => (optionsByQuestion[q.id] || []).length === 2 && (optionsByQuestion[q.id] || []).every(optionIsResolved)
-    );
+  function getOptionPair(qid: string) {
+    const opts = getOpts(qid);
+    return { a: opts[0] ?? null, b: opts[1] ?? null };
+  }
 
-  // Auto-layout simple por “profundidad” calculada desde start question
+  function isTwoOptionsReady(qid: string) {
+    const opts = getOpts(qid);
+    return opts.length === 2 && Boolean(opts[0]?.label) && Boolean(opts[1]?.label);
+  }
+
+  // Terminal = no hay salida para esa opción (next_question_id null)
+  function isTerminalOption(o: OptionRow) {
+    return o.next_question_id === null;
+  }
+
+  // “flecha abajo” si A y B van a la misma next (y no es null)
+  function isSharedNext(qid: string) {
+    const { a, b } = getOptionPair(qid);
+    if (!a || !b) return false;
+    if (!a.next_question_id || !b.next_question_id) return false;
+    return a.next_question_id === b.next_question_id;
+  }
+
+  // Publicar: requerido
+  // - plan existe
+  // - hay start_question_id definido (manual)
+  // - todas las questions tienen 2 options
+  // - no hay ciclos desde start
+  const canPublish = React.useMemo(() => {
+    if (!plan?.id) return false;
+    if (!plan.start_question_id) return false;
+    if (questions.length === 0) return false;
+    for (const q of questions) if (!isTwoOptionsReady(q.id)) return false;
+
+    // ciclo check desde start (DFS)
+    const visited = new Set<string>();
+    const stack = new Set<string>();
+
+    const byId = new Map(questions.map((q) => [q.id, q]));
+    function dfs(qid: string): boolean {
+      if (stack.has(qid)) return false; // ciclo
+      if (visited.has(qid)) return true;
+      visited.add(qid);
+      stack.add(qid);
+
+      const opts = getOpts(qid);
+      for (const o of opts) {
+        if (o.next_question_id && byId.has(o.next_question_id)) {
+          if (!dfs(o.next_question_id)) return false;
+        }
+      }
+
+      stack.delete(qid);
+      return true;
+    }
+
+    return dfs(plan.start_question_id);
+  }, [plan, questions, optionsByQuestion]);
+
+  // ---------- layout vertical tipo “canvas” ----------
+  // Objetivo: colocar nodos por niveles (depth) hacia abajo, con offset horizontal según rama.
+  // Soporta convergencia: si dos caminos llegan al mismo nodo, lo ubica una sola vez.
   const layout = React.useMemo(() => {
-    const nodes = questions.slice().sort((a, b) => a.ord - b.ord);
+    const nodeW = 420;
+    const nodeH = 120;
+    const gapY = 90;
+    const gapX = 140;
 
-    const start = plan?.start_question_id || nodes[0]?.id || null;
+    const byId = new Map(questions.map((q) => [q.id, q]));
+    const start = plan?.start_question_id || null;
+
+    // Calculamos depth mínimo desde start.
     const depth: Record<string, number> = {};
     if (start) depth[start] = 0;
 
-    // Propagación (ignora edges a null)
     let changed = true;
     let guard = 0;
-    while (changed && guard++ < 2000) {
+    while (changed && guard++ < 4000) {
       changed = false;
-      for (const q of nodes) {
+      for (const q of questions) {
         const d = depth[q.id];
         if (d == null) continue;
-
-        const opts = optionsByQuestion[q.id] || [];
+        const opts = getOpts(q.id);
         for (const o of opts) {
-          if (!o.next_question_id) continue; // null => FIN, no propagamos
+          if (!o.next_question_id) continue;
+          if (!byId.has(o.next_question_id)) continue;
           const nd = d + 1;
           const prev = depth[o.next_question_id];
           if (prev == null || nd < prev) {
@@ -342,37 +401,65 @@ function CreateCanvas({ session }: { session: Session }) {
       }
     }
 
-    const depths = Object.values(depth);
-    const maxDepth = depths.length ? Math.max(...depths) : 0;
-
-    // Agrupar por depth para asignar y (fila)
-    const buckets: Record<number, QuestionRow[]> = {};
-    for (const q of nodes) {
-      const d = depth[q.id] ?? 0; // si no alcanzable, queda a la izquierda
-      (buckets[d] ||= []).push(q);
-    }
-    for (const d of Object.keys(buckets)) {
-      buckets[Number(d)].sort((a, b) => a.ord - b.ord);
-    }
-
+    // Ahora posicionamos.
+    // Para “parecer” al ejemplo: start centrado; si se bifurca, izquierda/derecha.
+    // Regla:
+    // - Si sharedNext: el hijo va al centro debajo.
+    // - Si no shared: hijo de A va a la izquierda, hijo de B a la derecha.
+    // Convergencia: si un nodo ya tiene pos, no lo movemos (MVP).
     const pos: Record<string, { x: number; y: number }> = {};
-    const colWidth = 360;
-    const rowHeight = 220;
 
-    Object.entries(buckets).forEach(([dStr, qs]) => {
-      const d = Number(dStr);
-      qs.forEach((q, i) => {
-        pos[q.id] = { x: d * colWidth, y: i * rowHeight };
-      });
-    });
+    const startX = 900; // centro “virtual” del canvas
+    if (start && byId.has(start)) pos[start] = { x: startX, y: 60 };
 
-    // Nodo FIN virtual, a la derecha de todo
-    pos[END_NODE_ID] = { x: (maxDepth + 1) * colWidth, y: 0 };
+    // Orden por depth asc para ir ubicando
+    const nodesSorted = questions.slice().sort((a, b) => (depth[a.id] ?? 9999) - (depth[b.id] ?? 9999));
 
-    return { start, depth, pos, colWidth, rowHeight, maxDepth };
+    for (const q of nodesSorted) {
+      if (!pos[q.id]) {
+        // si no alcanzable, lo ponemos al costado abajo (draft)
+        pos[q.id] = { x: 60, y: 60 + (depth[q.id] ?? 0) * (nodeH + gapY) };
+      }
+
+      const parentPos = pos[q.id];
+      const { a, b } = getOptionPair(q.id);
+      if (!a || !b) continue;
+
+      const nextA = a.next_question_id && byId.has(a.next_question_id) ? a.next_question_id : null;
+      const nextB = b.next_question_id && byId.has(b.next_question_id) ? b.next_question_id : null;
+
+      if (nextA && nextB && nextA === nextB) {
+        // shared next: debajo centro
+        const child = nextA;
+        if (!pos[child]) {
+          pos[child] = { x: parentPos.x, y: parentPos.y + (nodeH + gapY) };
+        }
+      } else {
+        // split
+        if (nextA && !pos[nextA]) {
+          pos[nextA] = { x: parentPos.x - (nodeW + gapX), y: parentPos.y + (nodeH + gapY) };
+        }
+        if (nextB && !pos[nextB]) {
+          pos[nextB] = { x: parentPos.x + (nodeW + gapX), y: parentPos.y + (nodeH + gapY) };
+        }
+      }
+    }
+
+    // bounds
+    const xs = Object.values(pos).map((p) => p.x);
+    const ys = Object.values(pos).map((p) => p.y);
+    const minX = xs.length ? Math.min(...xs) : 0;
+    const maxX = xs.length ? Math.max(...xs) : 1200;
+    const minY = ys.length ? Math.min(...ys) : 0;
+    const maxY = ys.length ? Math.max(...ys) : 800;
+
+    const canvasW = (maxX - minX) + nodeW + 600;
+    const canvasH = (maxY - minY) + nodeH + 400;
+
+    return { pos, nodeW, nodeH, canvasW, canvasH, start, minX, minY };
   }, [questions, optionsByQuestion, plan?.start_question_id]);
 
-  // ---------- API actions ----------
+  // ---------- actions ----------
   async function createPlan() {
     setError(null);
     setBusy(true);
@@ -381,11 +468,13 @@ function CreateCanvas({ session }: { session: Session }) {
         method: "POST",
         body: JSON.stringify({ title: title.trim(), person_name: personName.trim() || null }),
       });
+
+      // IMPORTANTE: no asumimos start_question_id como válido.
+      // Lo dejamos como venga, pero el UI exige que el usuario lo marque.
       setPlan(data);
-      setSelectedQid(null);
       setQuestions([]);
       setOptionsByQuestion({});
-      setEnds({});
+      setSelectedQid(null);
       setShareUrl(null);
     } catch (e: any) {
       setError(String(e.message || e));
@@ -394,23 +483,29 @@ function CreateCanvas({ session }: { session: Session }) {
     }
   }
 
-  async function ensureFirstQuestion() {
+  async function addNodeInitial() {
     if (!plan?.id) return;
-    setError(null);
     setBusy(true);
+    setError(null);
     try {
-      const ord = 1;
-      const q = await authedFetch("/api/private/question", {
+      const nextOrd = (questions.reduce((m, q) => Math.max(m, q.ord), 0) || 0) + 1;
+
+      const q: QuestionRow = await authedFetch("/api/private/question", {
         method: "POST",
-        body: JSON.stringify({ plan_id: plan.id, ord, title: "¿Qué preferís?", subtitle: "Día o Noche" }),
+        body: JSON.stringify({
+          plan_id: plan.id,
+          ord: nextOrd,
+          title: "¿Qué preferís?",
+          subtitle: "Nueva decisión",
+        }),
       });
 
       const opts: OptionRow[] = await authedFetch("/api/private/options2", {
         method: "POST",
         body: JSON.stringify({
           question_id: q.id,
-          a: { label: "Día", image_url: null },
-          b: { label: "Noche", image_url: null },
+          a: { label: "Opción A", image_url: null },
+          b: { label: "Opción B", image_url: null },
         }),
       });
 
@@ -419,6 +514,29 @@ function CreateCanvas({ session }: { session: Session }) {
       setSelectedQid(q.id);
     } catch (e: any) {
       setError(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function setAsStart(qid: string) {
+    if (!plan?.id) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // Necesitás que el worker tenga este endpoint (si ya lo tenés, genial):
+      // PATCH /api/private/plan/:id  { start_question_id: qid }
+      const updated: PlanRow = await authedFetch(`/api/private/plan/${encodeURIComponent(plan.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ start_question_id: qid }),
+      });
+      setPlan(updated);
+    } catch (e: any) {
+      // fallback: si tu worker no lo tiene todavía, te lo digo en el error
+      setError(
+        "No pude marcar inicio. Asegurate de tener PATCH /api/private/plan/:id para setear start_question_id.\n" +
+          String(e.message || e)
+      );
     } finally {
       setBusy(false);
     }
@@ -433,21 +551,12 @@ function CreateCanvas({ session }: { session: Session }) {
         body: JSON.stringify({ next_question_id: toQid }),
       });
 
-      // actualizar local
       setOptionsByQuestion((prev) => {
         const list = prev[fromQid] || [];
         return {
           ...prev,
           [fromQid]: list.map((o) => (o.id === optionId ? { ...o, next_question_id: toQid } : o)),
         };
-      });
-
-      // UI ends: si conecto a null, marcamos FIN
-      setEnds((prev) => {
-        const copy = { ...prev };
-        if (toQid === null) copy[optionId] = true;
-        else delete copy[optionId];
-        return copy;
       });
     } catch (e: any) {
       setError(String(e.message || e));
@@ -456,18 +565,24 @@ function CreateCanvas({ session }: { session: Session }) {
     }
   }
 
+  async function connectBothTo(fromQid: string, toQid: string | null) {
+    const opts = getOpts(fromQid);
+    if (opts.length !== 2) return;
+    await connectOption(fromQid, opts[0].id, toQid);
+    await connectOption(fromQid, opts[1].id, toQid);
+  }
+
   function openCreateFromOption(fromQid: string, optionId: string) {
-    setLinkFromOption({ fromQid, optionId });
-    setNewQTitle("¿Qué preferís?");
-    setNewQSubtitle("");
+    setLinkFrom({ fromQid, optionId });
+    setNewSubtitle("");
     setNewA({ label: "", image_url: "" });
     setNewB({ label: "", image_url: "" });
   }
 
-  async function createQuestionFromOption() {
-    if (!plan?.id || !linkFromOption) return;
-    if (!newA.label.trim() || !newB.label.trim() || !newQSubtitle.trim()) {
-      setError("Completá subtítulo y las 2 opciones.");
+  async function createNodeAndConnect() {
+    if (!plan?.id || !linkFrom) return;
+    if (!newSubtitle.trim() || !newA.label.trim() || !newB.label.trim()) {
+      setError("Completá la pregunta (subtítulo) y las 2 opciones.");
       return;
     }
 
@@ -476,13 +591,13 @@ function CreateCanvas({ session }: { session: Session }) {
     try {
       const nextOrd = (questions.reduce((m, q) => Math.max(m, q.ord), 0) || 0) + 1;
 
-      const q = await authedFetch("/api/private/question", {
+      const q: QuestionRow = await authedFetch("/api/private/question", {
         method: "POST",
         body: JSON.stringify({
           plan_id: plan.id,
           ord: nextOrd,
-          title: newQTitle.trim() || "¿Qué preferís?",
-          subtitle: newQSubtitle.trim(),
+          title: "¿Qué preferís?",
+          subtitle: newSubtitle.trim(),
         }),
       });
 
@@ -495,32 +610,13 @@ function CreateCanvas({ session }: { session: Session }) {
         }),
       });
 
-      // Conectar la opción al nuevo nodo
-      await authedFetch(`/api/private/option/${encodeURIComponent(linkFromOption.optionId)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ next_question_id: q.id }),
-      });
+      // conectar la opción origen al nuevo nodo
+      await connectOption(linkFrom.fromQid, linkFrom.optionId, q.id);
 
-      // Actualizar estado local
       setQuestions((prev) => [...prev, q]);
       setOptionsByQuestion((prev) => ({ ...prev, [q.id]: opts }));
-
-      // También actualizamos la opción local del “fromQid”
-      setOptionsByQuestion((prev) => {
-        const fromOpts = prev[linkFromOption.fromQid] || [];
-        const updated = fromOpts.map((o) => (o.id === linkFromOption.optionId ? { ...o, next_question_id: q.id } : o));
-        return { ...prev, [linkFromOption.fromQid]: updated };
-      });
-
-      // UI: ya no es fin
-      setEnds((prev) => {
-        const copy = { ...prev };
-        delete copy[linkFromOption.optionId];
-        return copy;
-      });
-
       setSelectedQid(q.id);
-      setLinkFromOption(null);
+      setLinkFrom(null);
     } catch (e: any) {
       setError(String(e.message || e));
     } finally {
@@ -545,119 +641,151 @@ function CreateCanvas({ session }: { session: Session }) {
     }
   }
 
-  // ---------- UI components ----------
-  function NodeCard({ q }: { q: QuestionRow }) {
-    const pos = layout.pos[q.id] || { x: 0, y: 0 };
-    const selected = q.id === selectedQid;
-    const opts = optionsByQuestion[q.id] || [];
-    const complete = opts.length === 2 && opts.every(optionIsResolved);
+  // ---------- Canvas rendering ----------
+  function Node({ q }: { q: QuestionRow }) {
+    const p = layout.pos[q.id] || { x: 100, y: 100 };
+    const opts = getOpts(q.id);
+    const { a, b } = getOptionPair(q.id);
+
+    const isStart = plan?.start_question_id === q.id;
 
     return (
       <button
         type="button"
         onClick={() => setSelectedQid(q.id)}
-        style={{ transform: `translate(${pos.x}px, ${pos.y}px)` }}
+        style={{ transform: `translate(${p.x - layout.minX + 200}px, ${p.y - layout.minY + 60}px)` }}
         className={
-          "absolute w-[320px] rounded-3xl border shadow-2xl text-left p-4 " +
-          (selected ? "border-white/50 bg-white/10" : "border-white/15 bg-white/5 hover:bg-white/10")
+          "absolute text-left rounded-2xl border shadow-xl " +
+          (selectedQid === q.id ? "border-white/60 bg-white/10" : "border-white/15 bg-white/5 hover:bg-white/10")
         }
       >
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-xs tracking-widest text-white/60">Q{q.ord}</div>
-          <div
-            className={
-              "text-xs px-2 py-1 rounded-full border " +
-              (complete
-                ? "border-emerald-400/40 text-emerald-200 bg-emerald-500/10"
-                : "border-yellow-400/30 text-yellow-200 bg-yellow-500/10")
-            }
-          >
-            {complete ? "Completa" : "Incompleta"}
+        <div className="px-4 pt-3 pb-3" style={{ width: 420 }}>
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-white/60">Q{q.ord}</div>
+            {isStart ? (
+              <span className="text-xs px-2 py-1 rounded-full border border-emerald-400/40 text-emerald-200 bg-emerald-500/10">
+                INICIO
+              </span>
+            ) : (
+              <span className="text-xs px-2 py-1 rounded-full border border-white/15 text-white/60">
+                decisión
+              </span>
+            )}
           </div>
-        </div>
 
-        <div className="mt-2 text-lg font-semibold">{q.title || "¿Qué preferís?"}</div>
-        <div className="text-white/70 text-sm mt-1">{q.subtitle || ""}</div>
+          <div className="mt-2 text-sm font-semibold uppercase tracking-wide">
+            {(q.subtitle || "Nueva decisión").toUpperCase()}
+          </div>
 
-        <div className="mt-4 space-y-2">
-          {opts
-            .slice()
-            .sort((a, b) => a.ord - b.ord)
-            .map((o) => {
-              const resolved = optionIsResolved(o);
-              const to = o.next_question_id
-                ? `→ Q${questions.find((x) => x.id === o.next_question_id)?.ord ?? "?"}`
-                : "→ FIN";
-              return (
-                <div key={o.id} className="flex items-center justify-between gap-2 text-sm">
-                  <div className="text-white">{o.label}</div>
-                  <div className={resolved ? "text-white/70" : "text-red-200"}>{to}</div>
-                </div>
-              );
-            })}
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <div className="rounded-xl border border-white/15 bg-black/20 px-3 py-2 text-sm">
+              {a?.label ?? "—"}
+            </div>
+            <div className="rounded-xl border border-white/15 bg-black/20 px-3 py-2 text-sm text-right">
+              {b?.label ?? "—"}
+            </div>
+          </div>
+
+          {/* puertos visuales (solo decorativos) */}
+          <div className="relative mt-3 h-4">
+            {/* izquierda */}
+            <div className="absolute left-1 top-1/2 -translate-y-1/2 h-2 w-2 rounded-full bg-white/35" />
+            {/* abajo */}
+            <div className="absolute left-1/2 top-full -translate-x-1/2 -translate-y-1/2 h-2 w-2 rounded-full bg-white/35" />
+            {/* derecha */}
+            <div className="absolute right-1 top-1/2 -translate-y-1/2 h-2 w-2 rounded-full bg-white/35" />
+          </div>
+
+          {/* hints terminal */}
+          {opts.length === 2 && (
+            <div className="mt-2 text-[11px] text-white/50 flex items-center justify-between">
+              <span>{isTerminalOption(opts[0]) ? "izq termina" : ""}</span>
+              <span>{isTerminalOption(opts[1]) ? "der termina" : ""}</span>
+            </div>
+          )}
         </div>
       </button>
     );
   }
 
-  function EdgesLayer() {
-    const paths: Array<{ d: string; key: string; unresolved?: boolean }> = [];
+  function Edges() {
+    const lines: Array<{ d: string; key: string }> = [];
+    const byId = new Map(questions.map((q) => [q.id, q]));
+
+    const nodeW = 420;
+    const nodeH = 120;
+
+    function nodeToScreen(qid: string) {
+      const p = layout.pos[qid];
+      if (!p) return null;
+      const x = (p.x - layout.minX + 200);
+      const y = (p.y - layout.minY + 60);
+      return { x, y };
+    }
 
     for (const q of questions) {
-      const fromPos = layout.pos[q.id];
-      if (!fromPos) continue;
+      const pFrom = nodeToScreen(q.id);
+      if (!pFrom) continue;
 
-      const opts = (optionsByQuestion[q.id] || []).slice().sort((a, b) => a.ord - b.ord);
-      for (let i = 0; i < opts.length; i++) {
-        const o = opts[i];
+      const { a, b } = getOptionPair(q.id);
+      if (!a || !b) continue;
 
-        const x1 = fromPos.x + 320;
-        const y1 = fromPos.y + 140 + i * 22;
+      const nextA = a.next_question_id && byId.has(a.next_question_id) ? a.next_question_id : null;
+      const nextB = b.next_question_id && byId.has(b.next_question_id) ? b.next_question_id : null;
 
-        // destino: si null => FIN virtual
-        const targetId = o.next_question_id === null ? END_NODE_ID : o.next_question_id;
+      // puntos de salida (izq / abajo / der)
+      const outLeft = { x: pFrom.x + 8, y: pFrom.y + 92 };
+      const outRight = { x: pFrom.x + nodeW - 8, y: pFrom.y + 92 };
+      const outBottom = { x: pFrom.x + nodeW / 2, y: pFrom.y + nodeH + 6 };
 
-        let x2 = x1 + 120;
-        let y2 = y1;
+      // destino: entrar arriba centro del nodo hijo
+      const mkCurve = (x1: number, y1: number, x2: number, y2: number) => {
+        const midY = (y1 + y2) / 2;
+        return `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+      };
 
-        if (targetId && layout.pos[targetId]) {
-          const toPos = layout.pos[targetId];
-          x2 = toPos.x;
-          y2 = toPos.y + 120;
+      if (nextA && nextB && nextA === nextB) {
+        // shared: flecha abajo
+        const pTo = nodeToScreen(nextA);
+        if (pTo) {
+          const inTop = { x: pTo.x + nodeW / 2, y: pTo.y - 8 };
+          lines.push({
+            key: `${q.id}-shared-${nextA}`,
+            d: mkCurve(outBottom.x, outBottom.y, inTop.x, inTop.y),
+          });
         }
-
-        const midX = (x1 + x2) / 2;
-        const d = `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
-
-        paths.push({
-          d,
-          key: `${o.id}`,
-          unresolved: !optionIsResolved(o),
-        });
+      } else {
+        if (nextA) {
+          const pTo = nodeToScreen(nextA);
+          if (pTo) {
+            const inTop = { x: pTo.x + nodeW / 2, y: pTo.y - 8 };
+            lines.push({
+              key: `${a.id}-A-${nextA}`,
+              d: mkCurve(outLeft.x, outLeft.y, inTop.x, inTop.y),
+            });
+          }
+        }
+        if (nextB) {
+          const pTo = nodeToScreen(nextB);
+          if (pTo) {
+            const inTop = { x: pTo.x + nodeW / 2, y: pTo.y - 8 };
+            lines.push({
+              key: `${b.id}-B-${nextB}`,
+              d: mkCurve(outRight.x, outRight.y, inTop.x, inTop.y),
+            });
+          }
+        }
       }
     }
 
     return (
-      <svg className="absolute inset-0 pointer-events-none" width="100%" height="100%" viewBox="0 0 3000 2000" preserveAspectRatio="none">
-        {paths.map((p) => (
-          <path
-            key={p.key}
-            d={p.d}
-            fill="none"
-            stroke="currentColor"
-            className={p.unresolved ? "text-red-300/50" : "text-white/30"}
-            strokeWidth="2"
-          />
+      <svg className="absolute inset-0 pointer-events-none" width="100%" height="100%" viewBox={`0 0 ${layout.canvasW} ${layout.canvasH}`} preserveAspectRatio="none">
+        {lines.map((l) => (
+          <path key={l.key} d={l.d} fill="none" stroke="currentColor" className="text-white/35" strokeWidth="2" />
         ))}
       </svg>
     );
   }
-
-  // Canvas size
-  const maxX = Math.max(0, ...Object.values(layout.pos).map((p) => p.x));
-  const maxY = Math.max(0, ...Object.values(layout.pos).map((p) => p.y));
-  const canvasW = maxX + 700;
-  const canvasH = maxY + 500;
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -682,12 +810,12 @@ function CreateCanvas({ session }: { session: Session }) {
 
       <main className="mx-auto max-w-7xl px-6 pb-12">
         {error && (
-          <div className="mb-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+          <div className="mb-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200 whitespace-pre-wrap">
             {error}
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_420px] gap-6">
           {/* CANVAS */}
           <div className="rounded-3xl border border-white/15 bg-white/5 overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
@@ -696,6 +824,11 @@ function CreateCanvas({ session }: { session: Session }) {
                 <div className="text-sm text-white/80">
                   {plan ? `${plan.title}${plan.person_name ? ` · para ${plan.person_name}` : ""}` : "Creá tu plan y armá el diagrama"}
                 </div>
+                {plan && !plan.start_question_id && (
+                  <div className="text-xs text-yellow-200/80 mt-1">
+                    ⚠️ Marcá manualmente el nodo de inicio (seleccioná uno y “Marcar como inicio”).
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
@@ -705,30 +838,20 @@ function CreateCanvas({ session }: { session: Session }) {
                   <button
                     disabled={busy}
                     className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15 disabled:opacity-50"
-                    onClick={ensureFirstQuestion}
+                    onClick={addNodeInitial}
                   >
-                    + Nodo inicial
+                    + Agregar decisión
                   </button>
                 )}
               </div>
             </div>
 
             <div className="relative overflow-auto" style={{ height: "calc(100vh - 220px)" }}>
-              <div className="relative" style={{ width: canvasW, height: canvasH, minWidth: "100%", minHeight: "100%" }}>
-                <EdgesLayer />
-
+              <div className="relative" style={{ width: layout.canvasW, height: layout.canvasH, minWidth: "100%", minHeight: "100%" }}>
+                <Edges />
                 {questions.map((q) => (
-                  <NodeCard key={q.id} q={q} />
+                  <Node key={q.id} q={q} />
                 ))}
-
-                {/* Nodo FIN virtual */}
-                <div
-                  style={{ transform: `translate(${layout.pos[END_NODE_ID].x}px, ${layout.pos[END_NODE_ID].y}px)` }}
-                  className="absolute w-[220px] rounded-3xl border border-white/15 bg-white/5 p-4 text-center shadow-2xl"
-                >
-                  <div className="text-xs tracking-widest text-white/60">FINAL</div>
-                  <div className="mt-2 text-2xl font-semibold">FIN</div>
-                </div>
               </div>
             </div>
           </div>
@@ -747,7 +870,7 @@ function CreateCanvas({ session }: { session: Session }) {
                       className="mt-2 w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
-                      placeholder="Ej: Salida sorpresa"
+                      placeholder="Ej: San Valentín"
                     />
                   </div>
 
@@ -757,7 +880,7 @@ function CreateCanvas({ session }: { session: Session }) {
                       className="mt-2 w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
                       value={personName}
                       onChange={(e) => setPersonName(e.target.value)}
-                      placeholder="Ej: Sofi"
+                      placeholder="Ej: Matito"
                     />
                   </div>
 
@@ -772,107 +895,148 @@ function CreateCanvas({ session }: { session: Session }) {
               ) : (
                 <div className="mt-3 text-sm text-white/70">
                   Estado: <span className="text-white">{plan.status}</span>
+                  <div className="mt-2 text-xs text-white/60">
+                    Inicio: {plan.start_question_id ? "definido ✅" : "no definido"}
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* Node editor */}
+            {/* Editor */}
             <div className="rounded-3xl border border-white/15 bg-white/5 p-5">
               <div className="text-sm font-semibold">Editor</div>
 
-              {!selectedQid ? (
-                <div className="mt-3 text-white/70 text-sm">
-                  Seleccioná un nodo del canvas para editar sus conexiones.
-                </div>
+              {!selectedQ ? (
+                <div className="mt-3 text-white/70 text-sm">Seleccioná un nodo para editar conexiones.</div>
               ) : (
                 <div className="mt-4 space-y-4">
-                  <div className="text-sm text-white/70">
-                    {questions.find((q) => q.id === selectedQid)?.subtitle || "—"}
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-xs text-white/60">Nodo</div>
+                      <div className="text-sm font-semibold">{selectedQ.subtitle || "Nueva decisión"}</div>
+                    </div>
+
+                    <button
+                      disabled={busy}
+                      className="rounded-2xl bg-white text-slate-950 px-3 py-2 text-sm font-semibold disabled:opacity-50"
+                      onClick={() => setAsStart(selectedQ.id)}
+                    >
+                      Marcar como inicio
+                    </button>
                   </div>
 
-                  {(optsForSelected.slice().sort((a, b) => a.ord - b.ord)).map((o) => {
-                    const resolved = optionIsResolved(o);
-                    const isEnd = o.next_question_id === null;
-                    return (
-                      <div key={o.id} className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="font-semibold">{o.label}</div>
-                          <div
-                            className={
-                              "text-xs px-2 py-1 rounded-full border " +
-                              (resolved
-                                ? "border-emerald-400/30 text-emerald-200 bg-emerald-500/10"
-                                : "border-red-400/30 text-red-200 bg-red-500/10")
-                            }
+                  {selectedOpts.length === 2 ? (
+                    <>
+                      {/* Conectar ambas */}
+                      <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                        <div className="text-xs text-white/60 mb-2">
+                          Si la siguiente decisión es la misma para ambas opciones → flecha abajo
+                        </div>
+                        <div className="flex gap-2">
+                          <select
+                            className="flex-1 rounded-2xl bg-white/10 border border-white/15 px-3 py-2 text-sm outline-none"
+                            disabled={busy}
+                            defaultValue=""
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (!v) return;
+                              connectBothTo(selectedQ.id, v);
+                              e.currentTarget.value = "";
+                            }}
                           >
-                            {resolved ? (isEnd ? "FIN" : "Conectada") : "Sin definir"}
-                          </div>
+                            <option value="" disabled>
+                              Conectar ambas a…
+                            </option>
+                            {questions
+                              .filter((q) => q.id !== selectedQ.id)
+                              .sort((a, b) => a.ord - b.ord)
+                              .map((q) => (
+                                <option key={q.id} value={q.id}>
+                                  Q{q.ord} · {q.subtitle || q.title || "Sin título"}
+                                </option>
+                              ))}
+                          </select>
+
+                          <button
+                            disabled={busy}
+                            className="rounded-2xl bg-white/10 border border-white/15 px-3 py-2 text-sm hover:bg-white/15 disabled:opacity-50"
+                            onClick={() => connectBothTo(selectedQ.id, null)}
+                          >
+                            Terminar ambas
+                          </button>
                         </div>
 
-                        <div className="mt-3 space-y-2">
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              disabled={busy}
-                              className="rounded-2xl bg-white/10 border border-white/15 px-3 py-2 text-sm hover:bg-white/15 disabled:opacity-50"
-                              onClick={() => openCreateFromOption(selectedQid, o.id)}
-                            >
-                              Crear pregunta y conectar
-                            </button>
-
-                            <button
-                              disabled={busy}
-                              className="rounded-2xl bg-white text-slate-950 px-3 py-2 text-sm font-semibold hover:opacity-90 disabled:opacity-50"
-                              onClick={() => connectOption(selectedQid, o.id, null)}
-                            >
-                              Conectar a FIN
-                            </button>
+                        {isSharedNext(selectedQ.id) && (
+                          <div className="mt-2 text-xs text-emerald-200/80">
+                            ✅ Ambas opciones conectan al mismo nodo (se dibuja flecha abajo)
                           </div>
-
-                          <div>
-                            <div className="text-xs text-white/60 mb-1">Conectar a nodo existente</div>
-                            <select
-                              className="w-full rounded-2xl bg-white/10 border border-white/15 px-3 py-2 text-sm outline-none"
-                              disabled={busy}
-                              value={o.next_question_id ?? ""}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                if (!v) return;
-                                connectOption(selectedQid, o.id, v);
-                              }}
-                            >
-                              <option value="" disabled>
-                                Elegir nodo…
-                              </option>
-                              {questions
-                                .filter((q) => q.id !== selectedQid)
-                                .sort((a, b) => a.ord - b.ord)
-                                .map((q) => (
-                                  <option key={q.id} value={q.id}>
-                                    Q{q.ord} · {q.subtitle || q.title || "Sin título"}
-                                  </option>
-                                ))}
-                            </select>
-                          </div>
-                        </div>
+                        )}
                       </div>
-                    );
-                  })}
 
-                  {linkFromOption && (
+                      {/* Conectar individual */}
+                      {selectedOpts.map((o, idx) => (
+                        <div key={o.id} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                          <div className="flex items-center justify-between">
+                            <div className="font-semibold">{idx === 0 ? "Izquierda" : "Derecha"}: {o.label}</div>
+                            <div className="text-xs text-white/60">
+                              {o.next_question_id ? "conectada" : "termina"}
+                            </div>
+                          </div>
+
+                          <div className="mt-3 space-y-2">
+                            <div className="flex gap-2">
+                              <select
+                                className="flex-1 rounded-2xl bg-white/10 border border-white/15 px-3 py-2 text-sm outline-none"
+                                disabled={busy}
+                                value={o.next_question_id ?? ""}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  connectOption(selectedQ.id, o.id, v || null);
+                                }}
+                              >
+                                <option value="">(Termina aquí)</option>
+                                {questions
+                                  .filter((q) => q.id !== selectedQ.id)
+                                  .sort((a, b) => a.ord - b.ord)
+                                  .map((q) => (
+                                    <option key={q.id} value={q.id}>
+                                      Q{q.ord} · {q.subtitle || q.title || "Sin título"}
+                                    </option>
+                                  ))}
+                              </select>
+
+                              <button
+                                disabled={busy}
+                                className="rounded-2xl bg-white/10 border border-white/15 px-3 py-2 text-sm hover:bg-white/15 disabled:opacity-50"
+                                onClick={() => openCreateFromOption(selectedQ.id, o.id)}
+                              >
+                                + Crear y conectar
+                              </button>
+                            </div>
+
+                            <div className="text-xs text-white/50">
+                              Si esta conexión queda en “Termina aquí”, esa rama termina sin nodo FIN.
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <div className="text-sm text-white/70">
+                      Este nodo todavía no tiene 2 opciones (algo falló al crearlo).
+                    </div>
+                  )}
+
+                  {linkFrom && (
                     <div className="rounded-2xl border border-white/15 bg-white/5 p-4">
-                      <div className="text-sm font-semibold">Nueva pregunta (conectar)</div>
+                      <div className="text-sm font-semibold">Crear nueva decisión</div>
+
                       <div className="mt-3 space-y-2">
                         <input
                           className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                          value={newQTitle}
-                          onChange={(e) => setNewQTitle(e.target.value)}
-                          placeholder="¿Qué preferís?"
-                        />
-                        <input
-                          className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                          value={newQSubtitle}
-                          onChange={(e) => setNewQSubtitle(e.target.value)}
-                          placeholder="Ej: Cena mexicana o china"
+                          value={newSubtitle}
+                          onChange={(e) => setNewSubtitle(e.target.value)}
+                          placeholder="Ej: ¿Qué cena preferís?"
                         />
 
                         <div className="grid grid-cols-1 gap-2">
@@ -880,40 +1044,28 @@ function CreateCanvas({ session }: { session: Session }) {
                             className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
                             value={newA.label}
                             onChange={(e) => setNewA((p) => ({ ...p, label: e.target.value }))}
-                            placeholder="Opción A"
-                          />
-                          <input
-                            className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                            value={newA.image_url}
-                            onChange={(e) => setNewA((p) => ({ ...p, image_url: e.target.value }))}
-                            placeholder="URL imagen A (opcional)"
+                            placeholder="Opción izquierda"
                           />
                           <input
                             className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
                             value={newB.label}
                             onChange={(e) => setNewB((p) => ({ ...p, label: e.target.value }))}
-                            placeholder="Opción B"
-                          />
-                          <input
-                            className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                            value={newB.image_url}
-                            onChange={(e) => setNewB((p) => ({ ...p, image_url: e.target.value }))}
-                            placeholder="URL imagen B (opcional)"
+                            placeholder="Opción derecha"
                           />
                         </div>
 
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 pt-2">
                           <button
                             disabled={busy}
                             className="flex-1 rounded-2xl bg-white text-slate-950 px-4 py-3 font-semibold disabled:opacity-50"
-                            onClick={createQuestionFromOption}
+                            onClick={createNodeAndConnect}
                           >
                             {busy ? "Creando…" : "Crear y conectar"}
                           </button>
                           <button
                             disabled={busy}
                             className="rounded-2xl bg-white/10 border border-white/15 px-4 py-3"
-                            onClick={() => setLinkFromOption(null)}
+                            onClick={() => setLinkFrom(null)}
                           >
                             Cancelar
                           </button>
@@ -929,7 +1081,9 @@ function CreateCanvas({ session }: { session: Session }) {
             <div className="rounded-3xl border border-white/15 bg-white/5 p-5">
               <div className="text-sm font-semibold">Publicar</div>
               <div className="mt-2 text-sm text-white/70">
-                {canPublish ? "Listo para publicar ✅" : "Faltan conexiones (cada opción debe ir a otra pregunta o terminar en FIN)."}
+                {canPublish
+                  ? "Listo para publicar ✅"
+                  : "Para publicar: definí el nodo de inicio y asegurate de que no haya ciclos. Las ramas pueden terminar sin nodo FIN."}
               </div>
 
               <div className="mt-4 flex flex-wrap gap-2">
