@@ -325,8 +325,8 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
   method: "POST",
   body: JSON.stringify({
     question_id: q.id,
-    a: { label: "Opción 1", image_url: null },
-    b: { label: "Opción 2", image_url: null },
+    a: { label: " ", image_url: null },
+    b: { label: " ", image_url: null },
   }),
 });
 
@@ -351,6 +351,28 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
       setError(String(e.message || e));
     }
   }
+
+  async function deleteDecision(qid: string) {
+  if (!confirm("¿Eliminar esta decisión?")) return;
+  setBusy(true);
+  setError(null);
+  try {
+    await authedFetch(`/api/private/question/${encodeURIComponent(qid)}`, {
+      method: "DELETE",
+    });
+
+    setQuestions((prev) => prev.filter((q) => q.id !== qid));
+    setOptionsByQuestion((prev) => {
+      const copy = { ...prev };
+      delete copy[qid];
+      return copy;
+    });
+  } catch (e: any) {
+    setError(String(e.message || e));
+  } finally {
+    setBusy(false);
+  }
+}
 
   async function patchOption(qid: string, oid: string, patch: Partial<OptionRow>) {
     setError(null);
@@ -476,12 +498,33 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
 
               return (
                 <div key={q.id} className="rounded-3xl border border-white/15 bg-white/5 p-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-semibold">#{idx + 1} decisión</div>
-                    <div className={"text-xs px-2 py-1 rounded-full border " + (complete ? "border-emerald-400/40 text-emerald-200 bg-emerald-500/10" : "border-yellow-400/30 text-yellow-200 bg-yellow-500/10")}>
-                      {complete ? "Completa" : "Incompleta"}
-                    </div>
-                  </div>
+<div className="flex items-center justify-between gap-3">
+  <div className="text-sm font-semibold">#{idx + 1} decisión</div>
+
+  <div className="flex items-center gap-2">
+    <div
+      className={
+        "text-xs px-2 py-1 rounded-full border " +
+        (complete
+          ? "border-emerald-400/40 text-emerald-200 bg-emerald-500/10"
+          : "border-yellow-400/30 text-yellow-200 bg-yellow-500/10")
+      }
+    >
+      {complete ? "Completa" : "Incompleta"}
+    </div>
+
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => deleteDecision(q.id)}
+      title="Eliminar"
+      className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200 hover:bg-red-500/20 disabled:opacity-50"
+    >
+      🗑️
+    </button>
+  </div>
+</div>
+
 
                   <div className="mt-3">
                     <div className="text-xs text-white/60 mb-1">Pregunta</div>
@@ -503,7 +546,7 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
                       <div className="text-xs text-white/60 mb-2">Opción izquierda</div>
                       <input
                         className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                        value={o1?.label ?? ""}
+                        value={(o1?.label ?? "").trim() === "" ? "" : (o1?.label ?? "")}
                         onChange={(e) => {
                           const v = e.target.value;
                           setOptionsByQuestion((prev) => ({
@@ -512,7 +555,7 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
                           }));
                         }}
                         onBlur={() => o1 && patchOption(q.id, o1.id, { label: o1.label } as any)}
-                        placeholder="Ej: Día"
+                        placeholder="Opcion 1"
                       />
                       <input
                         className="mt-2 w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
@@ -534,7 +577,7 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
                       <div className="text-xs text-white/60 mb-2">Opción derecha</div>
                       <input
                         className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                        value={o2?.label ?? ""}
+                        value={(o1?.label ?? "").trim() === "" ? "" : (o1?.label ?? "")}
                         onChange={(e) => {
                           const v = e.target.value;
                           setOptionsByQuestion((prev) => ({
@@ -543,7 +586,7 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
                           }));
                         }}
                         onBlur={() => o2 && patchOption(q.id, o2.id, { label: o2.label } as any)}
-                        placeholder="Ej: Noche"
+                        placeholder="Opcion 2"
                       />
                       <input
                         className="mt-2 w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
@@ -559,23 +602,6 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
                         placeholder="URL imagen (opcional)"
                       />
                     </div>
-                  </div>
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <button
-                      className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
-                      disabled={busy}
-                      onClick={() => moveQuestion(q.id, -1)}
-                    >
-                      Subir
-                    </button>
-                    <button
-                      className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
-                      disabled={busy}
-                      onClick={() => moveQuestion(q.id, +1)}
-                    >
-                      Bajar
-                    </button>
                   </div>
                 </div>
               );
