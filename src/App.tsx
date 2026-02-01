@@ -4,9 +4,10 @@ import { createClient, type Session } from "@supabase/supabase-js";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// Sentinel para “vacío” en DB (evita missing_labels) pero UI lo muestra vacío
+const EMPTY = "__";
 
 type PublicPlan =
   | { status: "expired" | "unpublished" | "not_found" | "invalid_code" | string; [k: string]: any }
@@ -105,7 +106,7 @@ function Home({ session }: { session: Session | null }) {
             Creá invitaciones interactivas para armar planes.
           </h1>
           <p className="text-white/70 text-lg">
-            Armás preguntas con dos opciones (con fotos), con branching para decisiones complejas.
+            Armás preguntas con dos opciones (con fotos).
           </p>
 
           <div className="flex flex-wrap gap-3 pt-2">
@@ -159,11 +160,7 @@ function Login() {
       } else {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) setMsg(error.message);
-        else {
-          // Si desactivaste confirm email en Supabase, esto ya te deja logueado (o al menos el usuario activo).
-          // Si por alguna razón no devuelve sesión, mandamos a login.
-          navigate("/create");
-        }
+        else navigate("/create");
       }
     } finally {
       setBusy(false);
@@ -244,7 +241,14 @@ function Login() {
 function CreateLinear({ session }: { session: Session }) {
   type PlanRow = { id: string; title: string; person_name: string | null; status: string };
   type QuestionRow = { id: string; plan_id: string; ord: number; title: string; subtitle: string | null };
-  type OptionRow = { id: string; question_id: string; ord: number; label: string; image_url: string | null; next_question_id: string | null };
+  type OptionRow = {
+    id: string;
+    question_id: string;
+    ord: number;
+    label: string;
+    image_url: string | null;
+    next_question_id: string | null;
+  };
 
   async function authedFetch(path: string, init?: RequestInit) {
     const token = session.access_token;
@@ -256,8 +260,14 @@ function CreateLinear({ session }: { session: Session }) {
         "content-type": "application/json",
       },
     });
+
     const data = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(data ? JSON.stringify(data) : "Request failed");
+    if (!res.ok) {
+      // Mensaje más legible
+      const detail =
+        (data && (data.detail || data.error || data.message || data.status)) ? JSON.stringify(data) : `HTTP ${res.status}`;
+      throw new Error(detail);
+    }
     return data;
   }
 
@@ -278,9 +288,15 @@ function CreateLinear({ session }: { session: Session }) {
     return (optionsByQuestion[qid] || []).slice().sort((a, b) => a.ord - b.ord);
   }
 
+  function uiLabel(label: string) {
+    return label === EMPTY ? "" : label;
+  }
+
   function isComplete(q: QuestionRow) {
     const opts = getOpts(q.id);
-    return Boolean(q.subtitle?.trim()) && opts.length === 2 && opts.every((o) => o.label.trim().length > 0);
+    return Boolean(q.subtitle?.trim()) &&
+      opts.length === 2 &&
+      opts.every((o) => uiLabel(o.label).trim().length > 0);
   }
 
   const canPublish = plan?.id && sortedQuestions.length > 0 && sortedQuestions.every(isComplete);
@@ -321,14 +337,15 @@ function CreateLinear({ session }: { session: Session }) {
         }),
       });
 
-const opts: OptionRow[] = await authedFetch("/api/private/options2", {
-  method: "POST",
-  body: JSON.stringify({
-    question_id: q.id,
-    a: { label: " ", image_url: null },
-    b: { label: " ", image_url: null },
-  }),
-});
+      // IMPORTANTE: labels no vacíos para evitar missing_labels en Worker
+      const opts: OptionRow[] = await authedFetch("/api/private/options2", {
+        method: "POST",
+        body: JSON.stringify({
+          question_id: q.id,
+          a: { label: EMPTY, image_url: null },
+          b: { label: EMPTY, image_url: null },
+        }),
+      });
 
       setQuestions((prev) => [...prev, q]);
       setOptionsByQuestion((prev) => ({ ...prev, [q.id]: opts }));
@@ -348,31 +365,33 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
       });
       setQuestions((prev) => prev.map((q) => (q.id === qid ? { ...q, ...updated } : q)));
     } catch (e: any) {
-      setError(String(e.message || e));
+      setError(
+        `No se pudo guardar la pregunta. Si ves 405, falta implementar PATCH en el Worker.\n${String(e.message || e)}`
+      );
     }
   }
 
   async function deleteDecision(qid: string) {
-  if (!confirm("¿Eliminar esta decisión?")) return;
-  setBusy(true);
-  setError(null);
-  try {
-    await authedFetch(`/api/private/question/${encodeURIComponent(qid)}`, {
-      method: "DELETE",
-    });
+    if (!confirm("¿Eliminar esta decisión?")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await authedFetch(`/api/private/question/${encodeURIComponent(qid)}`, { method: "DELETE" });
 
-    setQuestions((prev) => prev.filter((q) => q.id !== qid));
-    setOptionsByQuestion((prev) => {
-      const copy = { ...prev };
-      delete copy[qid];
-      return copy;
-    });
-  } catch (e: any) {
-    setError(String(e.message || e));
-  } finally {
-    setBusy(false);
+      setQuestions((prev) => prev.filter((q) => q.id !== qid));
+      setOptionsByQuestion((prev) => {
+        const copy = { ...prev };
+        delete copy[qid];
+        return copy;
+      });
+    } catch (e: any) {
+      setError(
+        `No se pudo eliminar. Si ves 405, falta implementar DELETE en el Worker.\n${String(e.message || e)}`
+      );
+    } finally {
+      setBusy(false);
+    }
   }
-}
 
   async function patchOption(qid: string, oid: string, patch: Partial<OptionRow>) {
     setError(null);
@@ -388,30 +407,6 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
     } catch (e: any) {
       setError(String(e.message || e));
     }
-  }
-
-  async function moveQuestion(qid: string, dir: -1 | 1) {
-    const list = sortedQuestions;
-    const idx = list.findIndex((q) => q.id === qid);
-    if (idx < 0) return;
-    const j = idx + dir;
-    if (j < 0 || j >= list.length) return;
-
-    // swap ord local + persist (PATCH question ord)
-    const a = list[idx];
-    const b = list[j];
-
-    setQuestions((prev) =>
-      prev.map((q) => {
-        if (q.id === a.id) return { ...q, ord: b.ord };
-        if (q.id === b.id) return { ...q, ord: a.ord };
-        return q;
-      })
-    );
-
-    // persist best-effort
-    await patchQuestion(a.id, { ord: b.ord } as any);
-    await patchQuestion(b.id, { ord: a.ord } as any);
   }
 
   async function publish(expiresHours: number | null) {
@@ -483,7 +478,8 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
             </div>
           ) : (
             <div className="mt-2 text-sm text-white/70">
-              {plan.title}{plan.person_name ? ` · para ${plan.person_name}` : ""} · estado:{" "}
+              {plan.title}
+              {plan.person_name ? ` · para ${plan.person_name}` : ""} · estado:{" "}
               <span className="text-white">{plan.status}</span>
             </div>
           )}
@@ -493,38 +489,39 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
         {plan && (
           <div className="mt-6 space-y-4">
             {sortedQuestions.map((q, idx) => {
-              const [o1, o2] = getOpts(q.id);
+              const opts = getOpts(q.id);
+              const o1 = opts[0];
+              const o2 = opts[1];
               const complete = isComplete(q);
 
               return (
                 <div key={q.id} className="rounded-3xl border border-white/15 bg-white/5 p-5">
-<div className="flex items-center justify-between gap-3">
-  <div className="text-sm font-semibold">#{idx + 1} decisión</div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold">#{idx + 1} decisión</div>
 
-  <div className="flex items-center gap-2">
-    <div
-      className={
-        "text-xs px-2 py-1 rounded-full border " +
-        (complete
-          ? "border-emerald-400/40 text-emerald-200 bg-emerald-500/10"
-          : "border-yellow-400/30 text-yellow-200 bg-yellow-500/10")
-      }
-    >
-      {complete ? "Completa" : "Incompleta"}
-    </div>
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={
+                          "text-xs px-2 py-1 rounded-full border " +
+                          (complete
+                            ? "border-emerald-400/40 text-emerald-200 bg-emerald-500/10"
+                            : "border-yellow-400/30 text-yellow-200 bg-yellow-500/10")
+                        }
+                      >
+                        {complete ? "Completa" : "Incompleta"}
+                      </div>
 
-    <button
-      type="button"
-      disabled={busy}
-      onClick={() => deleteDecision(q.id)}
-      title="Eliminar"
-      className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200 hover:bg-red-500/20 disabled:opacity-50"
-    >
-      🗑️
-    </button>
-  </div>
-</div>
-
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => deleteDecision(q.id)}
+                        title="Eliminar"
+                        className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200 hover:bg-red-500/20 disabled:opacity-50"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
 
                   <div className="mt-3">
                     <div className="text-xs text-white/60 mb-1">Pregunta</div>
@@ -535,28 +532,34 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
                         const v = e.target.value;
                         setQuestions((prev) => prev.map((x) => (x.id === q.id ? { ...x, subtitle: v } : x)));
                       }}
-                      onBlur={() => patchQuestion(q.id, { subtitle: q.subtitle ?? "" } as any)}
+                      onBlur={(e) => patchQuestion(q.id, { subtitle: e.currentTarget.value } as any)}
                       placeholder="Ej: ¿Qué horario te gustaría?"
                     />
                   </div>
 
                   <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Opción 1 */}
+                    {/* Izquierda */}
                     <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
                       <div className="text-xs text-white/60 mb-2">Opción izquierda</div>
+
                       <input
                         className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                        value={(o1?.label ?? "").trim() === "" ? "" : (o1?.label ?? "")}
+                        value={uiLabel(o1?.label ?? "")}
                         onChange={(e) => {
                           const v = e.target.value;
                           setOptionsByQuestion((prev) => ({
                             ...prev,
-                            [q.id]: (prev[q.id] || []).map((o) => (o.id === o1?.id ? { ...o, label: v } : o)),
+                            [q.id]: (prev[q.id] || []).map((o) => (o.id === o1?.id ? { ...o, label: v || EMPTY } : o)),
                           }));
                         }}
-                        onBlur={() => o1 && patchOption(q.id, o1.id, { label: o1.label } as any)}
-                        placeholder="Opcion 1"
+                        onBlur={(e) => {
+                          if (!o1) return;
+                          const v = e.currentTarget.value.trim();
+                          patchOption(q.id, o1.id, { label: v.length ? v : EMPTY } as any);
+                        }}
+                        placeholder="Escribí la opción izquierda…"
                       />
+
                       <input
                         className="mt-2 w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
                         value={o1?.image_url ?? ""}
@@ -567,27 +570,33 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
                             [q.id]: (prev[q.id] || []).map((o) => (o.id === o1?.id ? { ...o, image_url: v || null } : o)),
                           }));
                         }}
-                        onBlur={() => o1 && patchOption(q.id, o1.id, { image_url: o1.image_url } as any)}
+                        onBlur={(e) => o1 && patchOption(q.id, o1.id, { image_url: e.currentTarget.value || null } as any)}
                         placeholder="URL imagen (opcional)"
                       />
                     </div>
 
-                    {/* Opción 2 */}
+                    {/* Derecha */}
                     <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
                       <div className="text-xs text-white/60 mb-2">Opción derecha</div>
+
                       <input
                         className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                        value={(o2?.label ?? "").trim() === "" ? "" : (o2?.label ?? "")}
+                        value={uiLabel(o2?.label ?? "")}
                         onChange={(e) => {
                           const v = e.target.value;
                           setOptionsByQuestion((prev) => ({
                             ...prev,
-                            [q.id]: (prev[q.id] || []).map((o) => (o.id === o2?.id ? { ...o, label: v } : o)),
+                            [q.id]: (prev[q.id] || []).map((o) => (o.id === o2?.id ? { ...o, label: v || EMPTY } : o)),
                           }));
                         }}
-                        onBlur={() => o2 && patchOption(q.id, o2.id, { label: o2.label } as any)}
-                        placeholder="Opcion 2"
+                        onBlur={(e) => {
+                          if (!o2) return;
+                          const v = e.currentTarget.value.trim();
+                          patchOption(q.id, o2.id, { label: v.length ? v : EMPTY } as any);
+                        }}
+                        placeholder="Escribí la opción derecha…"
                       />
+
                       <input
                         className="mt-2 w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
                         value={o2?.image_url ?? ""}
@@ -598,7 +607,7 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
                             [q.id]: (prev[q.id] || []).map((o) => (o.id === o2?.id ? { ...o, image_url: v || null } : o)),
                           }));
                         }}
-                        onBlur={() => o2 && patchOption(q.id, o2.id, { image_url: o2.image_url } as any)}
+                        onBlur={(e) => o2 && patchOption(q.id, o2.id, { image_url: e.currentTarget.value || null } as any)}
                         placeholder="URL imagen (opcional)"
                       />
                     </div>
@@ -643,7 +652,8 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
                 <div className="mt-4 rounded-2xl border border-white/15 bg-black/20 p-3">
                   <div className="text-xs text-white/60">Link</div>
                   <div className="mt-1 font-mono text-sm break-all">
-                    {window.location.origin}{shareUrl}
+                    {window.location.origin}
+                    {shareUrl}
                   </div>
                   <button
                     className="mt-3 rounded-2xl bg-white text-slate-950 px-4 py-2 text-sm font-semibold"
@@ -664,17 +674,12 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
   );
 }
 
-
-
 function Expired() {
   return (
     <div className="min-h-screen bg-slate-950 text-white p-8">
       <h1 className="text-2xl font-semibold">Esta invitación ya no está disponible</h1>
       <p className="text-white/70 mt-2">Pedile a la persona que te comparta un link nuevo.</p>
-      <button
-        className="mt-4 rounded-2xl bg-white text-slate-950 px-4 py-2"
-        onClick={() => navigate("/")}
-      >
+      <button className="mt-4 rounded-2xl bg-white text-slate-950 px-4 py-2" onClick={() => navigate("/")}>
         Volver
       </button>
     </div>
@@ -850,7 +855,7 @@ function Invite() {
                     .map((o) => (
                       <OptionCard
                         key={o.id}
-                        label={o.label || ""}   // si está vacío, que se vea vacío (pero idealmente no publiquen así)
+                        label={o.label === EMPTY ? "" : (o.label || "")}
                         imageUrl={o.image_url}
                         disabled={busy}
                         onPick={() => pick(o.id)}
@@ -884,7 +889,6 @@ function Invite() {
   );
 }
 
-
 export default function App() {
   const path = usePath();
   const session = useSession();
@@ -904,4 +908,3 @@ export default function App() {
 
   return <Home session={session} />;
 }
-
