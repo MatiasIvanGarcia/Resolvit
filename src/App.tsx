@@ -577,7 +577,7 @@ const opts: OptionRow[] = await authedFetch("/api/private/options2", {
                       <div className="text-xs text-white/60 mb-2">Opción derecha</div>
                       <input
                         className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                        value={(o1?.label ?? "").trim() === "" ? "" : (o1?.label ?? "")}
+                        value={(o2?.label ?? "").trim() === "" ? "" : (o2?.label ?? "")}
                         onChange={(e) => {
                           const v = e.target.value;
                           setOptionsByQuestion((prev) => ({
