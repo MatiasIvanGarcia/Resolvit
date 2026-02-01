@@ -1,5 +1,12 @@
 import React from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { createClient, type Session } from "@supabase/supabase-js";
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
 
 type PublicPlan =
   | { status: "expired" | "unpublished" | "not_found" | "invalid_code" | string; [k: string]: any }
@@ -42,27 +49,189 @@ function navigate(to: string) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
-function Home() {
+function useSession() {
+  const [session, setSession] = React.useState<Session | null>(null);
+
+  React.useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  return session;
+}
+
+function Home({ session }: { session: Session | null }) {
   return (
-    <div className="min-h-screen bg-slate-950 text-white p-8">
-      <h1 className="text-3xl font-bold">Plan Invitación</h1>
-      <button
-        className="mt-4 rounded-2xl bg-white text-slate-950 px-4 py-2"
-        onClick={() => navigate("/create")}
-      >
-        Crear un plan
-      </button>
+    <div className="min-h-screen bg-slate-950 text-white">
+      <header className="mx-auto max-w-6xl px-6 py-6 flex items-center justify-between">
+        <div className="text-lg font-semibold">Plan Invitación</div>
+
+        <div className="flex items-center gap-3">
+          {session ? (
+            <>
+              <button
+                className="rounded-2xl bg-white text-slate-950 px-4 py-2 text-sm hover:opacity-90"
+                onClick={() => navigate("/create")}
+              >
+                Crear plan
+              </button>
+              <button
+                className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
+                onClick={async () => {
+                  await supabase.auth.signOut();
+                  navigate("/");
+                }}
+              >
+                Cerrar sesión
+              </button>
+            </>
+          ) : (
+            <button
+              className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
+              onClick={() => navigate("/login")}
+            >
+              Iniciar sesión
+            </button>
+          )}
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-6xl px-6 py-14">
+        <div className="max-w-2xl space-y-5">
+          <h1 className="text-4xl md:text-6xl font-semibold leading-tight">
+            Creá invitaciones interactivas para armar planes en segundos.
+          </h1>
+          <p className="text-white/70 text-lg">
+            Armás preguntas con dos opciones (con fotos) y el link permite que la otra persona elija.
+            Con branching podés crear árboles de decisión (Día/Noche → Merienda/Cena, etc).
+          </p>
+
+          <div className="flex flex-wrap gap-3 pt-2">
+            <button
+              className="rounded-2xl bg-white text-slate-950 px-5 py-3 text-sm font-semibold hover:opacity-90"
+              onClick={() => navigate(session ? "/create" : "/login")}
+            >
+              {session ? "Crear mi primer plan" : "Empezar"}
+            </button>
+            <button
+              className="rounded-2xl bg-white/10 border border-white/15 px-5 py-3 text-sm hover:bg-white/15"
+              onClick={() => navigate("/invite/ABC123")}
+            >
+              Ver demo
+            </button>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }
 
-function Create() {
+function Login() {
+  const [email, setEmail] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [sent, setSent] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  async function sendLink() {
+    setBusy(true);
+    setError(null);
+
+    const redirectTo = `${window.location.origin}/create`;
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: redirectTo },
+    });
+
+    setBusy(false);
+
+    if (error) setError(error.message);
+    else setSent(true);
+  }
+
   return (
-    <div className="min-h-screen bg-slate-950 text-white p-8">
-      Pantalla crear plan (siguiente paso)
+    <div className="min-h-screen bg-slate-950 text-white">
+      <header className="mx-auto max-w-6xl px-6 py-6 flex items-center justify-between">
+        <button className="text-lg font-semibold" onClick={() => navigate("/")}>
+          Plan Invitación
+        </button>
+      </header>
+
+      <main className="mx-auto max-w-6xl px-6 py-14">
+        <div className="max-w-md space-y-4">
+          <h1 className="text-3xl font-semibold">Iniciar sesión</h1>
+          <p className="text-white/70">
+            Te mandamos un link por mail. Hacés click y entrás sin contraseña.
+          </p>
+
+          <input
+            className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+            placeholder="tu@email.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="email"
+          />
+
+          {error && <div className="text-red-300 text-sm">{error}</div>}
+
+          <button
+            disabled={busy || !email}
+            onClick={sendLink}
+            className="w-full rounded-2xl bg-white text-slate-950 px-4 py-3 font-semibold disabled:opacity-50"
+          >
+            {busy ? "Enviando…" : "Enviar magic link"}
+          </button>
+
+          {sent && (
+            <div className="rounded-2xl border border-white/15 bg-white/5 p-4 text-white/80 text-sm">
+              Listo ✅ Revisá tu mail y hacé click en el link para entrar.
+            </div>
+          )}
+
+          <button className="w-full text-white/70 text-sm underline" onClick={() => navigate("/")}>
+            Volver
+          </button>
+        </div>
+      </main>
     </div>
   );
 }
+
+
+function Create({ session }: { session: Session }) {
+  return (
+    <div className="min-h-screen bg-slate-950 text-white">
+      <header className="mx-auto max-w-6xl px-6 py-6 flex items-center justify-between">
+        <button className="text-lg font-semibold" onClick={() => navigate("/")}>
+          Plan Invitación
+        </button>
+
+        <div className="flex items-center gap-3">
+          <div className="text-sm text-white/70">{session.user.email}</div>
+          <button
+            className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
+            onClick={async () => {
+              await supabase.auth.signOut();
+              navigate("/");
+            }}
+          >
+            Cerrar sesión
+          </button>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-6xl px-6 py-10">
+        <div className="rounded-3xl border border-white/15 bg-white/5 p-6">
+          Builder /create (siguiente paso): wizard para crear preguntas + branching.
+        </div>
+      </main>
+    </div>
+  );
+}
+
 
 function Expired() {
   return (
@@ -336,9 +505,22 @@ function Invite() {
 
 export default function App() {
   const path = usePath();
+  const session = useSession();
 
   if (path.startsWith("/invite/")) return <Invite />;
-  if (path === "/create") return <Create />;
+
+  if (path === "/login") return <Login />;
+
+  if (path === "/create") {
+    if (!session) {
+      navigate("/login");
+      return null;
+    }
+    return <Create session={session} />;
+  }
+
   if (path === "/expired") return <Expired />;
-  return <Home />;
+
+  return <Home session={session} />;
 }
+
