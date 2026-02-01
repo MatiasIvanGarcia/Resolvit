@@ -730,20 +730,14 @@ function Invite() {
   const [plan, setPlan] = React.useState<PublicPlan | null>(null);
   const [loading, setLoading] = React.useState(true);
 
-  const [currentQuestionId, setCurrentQuestionId] = React.useState<string | null>(null);
+  const [idx, setIdx] = React.useState(0);
   const [busy, setBusy] = React.useState(false);
   const [answers, setAnswers] = React.useState<Record<string, string>>({});
   const [result, setResult] = React.useState<{ invitation_text?: string } | null>(null);
 
-  // Cache start id so restart() can work even if currentQuestionId becomes null at the end
-  const startQuestionId = React.useMemo(() => {
-    if (!plan || plan.status !== "ok") return null;
-    return plan.plan.start_question_id;
-  }, [plan]);
-
-  const questionById = React.useMemo(() => {
-    if (!plan || plan.status !== "ok") return new Map<string, (typeof plan.questions)[number]>();
-    return new Map(plan.questions.map((q) => [q.id, q]));
+  const orderedQuestions = React.useMemo(() => {
+    if (!plan || plan.status !== "ok") return [];
+    return plan.questions.slice().sort((a, b) => a.ord - b.ord);
   }, [plan]);
 
   React.useEffect(() => {
@@ -765,76 +759,48 @@ function Invite() {
     };
   }, [code]);
 
-  // Set initial question once plan is loaded
-  React.useEffect(() => {
-    if (plan && plan.status === "ok") {
-      setCurrentQuestionId(plan.plan.start_question_id);
-    }
-  }, [plan]);
-
   function restart() {
+    setIdx(0);
     setBusy(false);
     setAnswers({});
     setResult(null);
-    setCurrentQuestionId(startQuestionId);
   }
 
-  async function finalize() {
+  async function finalize(finalAnswers: Record<string, string>) {
     const res = await fetch(`/api/public/submit/${encodeURIComponent(code)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ answers }),
+      body: JSON.stringify({ answers: finalAnswers }),
     });
     const data = await res.json();
     setResult(data);
   }
 
-  if (loading) {
-    return <div className="min-h-screen bg-slate-950 text-white p-8">Cargando…</div>;
-  }
+  if (loading) return <div className="min-h-screen bg-slate-950 text-white p-8">Cargando…</div>;
 
   if (!plan || plan.status !== "ok") {
     navigate("/expired");
     return null;
   }
 
-  // If start_question_id is null, the plan is misconfigured
-  if (!startQuestionId) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-white p-8">
-        <h1 className="text-2xl font-semibold">Plan inválido</h1>
-        <p className="text-white/70 mt-2">No tiene pregunta de inicio configurada.</p>
-        <button className="mt-4 rounded-2xl bg-white text-slate-950 px-4 py-2" onClick={() => navigate("/")}>
-          Volver
-        </button>
-      </div>
-    );
-  }
+  const total = orderedQuestions.length;
+  const done = idx >= total;
+  const q = orderedQuestions[idx];
 
-  const done = currentQuestionId === null;
-  const q = currentQuestionId ? questionById.get(currentQuestionId) : null;
-
-  // Progreso: cantidad de respuestas hechas (en branching no siempre recorre todas las questions del plan)
-  const answeredCount = Object.keys(answers).length;
-  const totalPossible = plan.questions.length;
-
-  async function pick(option: { id: string; next_question_id: string | null }) {
-    if (!q || busy) return;
+  async function pick(optionId: string) {
+    if (busy) return;
     setBusy(true);
 
-    // 1) Guardar respuesta para la pregunta actual
-    setAnswers((prev) => ({ ...prev, [q.id]: option.id }));
+    const nextAnswers = { ...answers, [q.id]: optionId };
+    setAnswers(nextAnswers);
 
-    // 2) Animación + avanzar por branching
     window.setTimeout(async () => {
+      const next = idx + 1;
+      setIdx(next);
       setBusy(false);
 
-      if (option.next_question_id) {
-        setCurrentQuestionId(option.next_question_id);
-      } else {
-        // Opción A: null => termina el flujo
-        setCurrentQuestionId(null);
-        await finalize();
+      if (next >= total) {
+        await finalize(nextAnswers);
       }
     }, 220);
   }
@@ -849,20 +815,17 @@ function Invite() {
               {plan.plan.person_name ? `Plan para ${plan.plan.person_name}` : plan.plan.title}
             </div>
           </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
-              onClick={restart}
-            >
-              Reiniciar
-            </button>
-          </div>
+          <button
+            className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
+            onClick={restart}
+          >
+            Reiniciar
+          </button>
         </header>
 
         <main className="mt-7">
           <AnimatePresence mode="wait">
-            {!done && q ? (
+            {!done ? (
               <motion.section
                 key={q.id}
                 {...fadeSlide}
@@ -875,20 +838,24 @@ function Invite() {
                   </div>
                   <div className="text-white/70 text-base md:text-lg">{q.subtitle || ""}</div>
                   <div className="text-xs text-white/60 mt-1">
-                    {answeredCount + 1} / {totalPossible}
+                    {idx + 1} / {total}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  {q.options.slice(0, 2).map((o) => (
-                    <OptionCard
-                      key={o.id}
-                      label={o.label}
-                      imageUrl={o.image_url}
-                      disabled={busy}
-                      onPick={() => pick({ id: o.id, next_question_id: o.next_question_id })}
-                    />
-                  ))}
+                  {q.options
+                    .slice()
+                    .sort((a, b) => a.ord - b.ord)
+                    .slice(0, 2)
+                    .map((o) => (
+                      <OptionCard
+                        key={o.id}
+                        label={o.label || ""}   // si está vacío, que se vea vacío (pero idealmente no publiquen así)
+                        imageUrl={o.image_url}
+                        disabled={busy}
+                        onPick={() => pick(o.id)}
+                      />
+                    ))}
                 </div>
               </motion.section>
             ) : (
@@ -907,25 +874,6 @@ function Invite() {
                   <pre className="whitespace-pre-wrap text-base md:text-lg leading-relaxed text-white/90">
                     {result?.invitation_text || "Generando…"}
                   </pre>
-
-                  <div className="mt-5 flex flex-wrap gap-3">
-                    <button
-                      className="rounded-2xl bg-white text-slate-950 px-4 py-2 text-sm hover:opacity-90"
-                      onClick={async () => {
-                        await navigator.clipboard.writeText(result?.invitation_text || "");
-                        alert("Copiado ✅");
-                      }}
-                      disabled={!result?.invitation_text}
-                    >
-                      Copiar invitación
-                    </button>
-                    <button
-                      className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
-                      onClick={restart}
-                    >
-                      Volver a elegir
-                    </button>
-                  </div>
                 </div>
               </motion.section>
             )}
@@ -935,6 +883,7 @@ function Invite() {
     </div>
   );
 }
+
 
 export default function App() {
   const path = usePath();
