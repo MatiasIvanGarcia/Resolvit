@@ -241,9 +241,12 @@ function Login() {
   );
 }
 
+function CreateCanvas({ session }: { session: Session }) {
+  type PlanRow = { id: string; title: string; person_name: string | null; status: string; start_question_id: string | null };
+  type QuestionRow = { id: string; plan_id: string; ord: number; title: string; subtitle: string | null };
+  type OptionRow = { id: string; question_id: string; ord: number; label: string; image_url: string | null; next_question_id: string | null };
 
-function Create({ session }: { session: Session }) {
-  // -------- helpers ----------
+  // ---------- authed fetch ----------
   async function authedFetch(path: string, init?: RequestInit) {
     const token = session.access_token;
     const res = await fetch(path, {
@@ -256,75 +259,106 @@ function Create({ session }: { session: Session }) {
     });
     const data = await res.json().catch(() => null);
     if (!res.ok) {
-      const msg = (data && (data.detail || data.error || data.message)) ? JSON.stringify(data) : "Request failed";
-      throw new Error(msg);
+      throw new Error((data && (data.detail || data.error || data.message)) ? JSON.stringify(data) : "Request failed");
     }
     return data;
   }
 
-  // -------- state ----------
-  type Step = "meta" | "q" | "branch" | "publish";
-  const [resolvedOptionIds, setResolvedOptionIds] = React.useState<Record<string, boolean>>({});
-  
-  function nextPendingOption(opts: Array<{ id: string; label: string }>, resolved: Record<string, boolean>) {
-    return opts.find((o) => !resolved[o.id]) ?? null;
-  }
-
-  const [step, setStep] = React.useState<Step>("meta");
+  // ---------- state ----------
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const [planId, setPlanId] = React.useState<string | null>(null);
-
+  // Plan meta
+  const [plan, setPlan] = React.useState<PlanRow | null>(null);
   const [title, setTitle] = React.useState("");
   const [personName, setPersonName] = React.useState("");
 
-  // Current question being edited/created
-  const [questionId, setQuestionId] = React.useState<string | null>(null);
-  const [qSubtitle, setQSubtitle] = React.useState(""); // usamos subtitle como “Día o Noche…”
-  const [qTitle, setQTitle] = React.useState("¿Qué preferís?");
+  // Graph data
+  const [questions, setQuestions] = React.useState<QuestionRow[]>([]);
+  const [optionsByQuestion, setOptionsByQuestion] = React.useState<Record<string, OptionRow[]>>({});
 
-  // Options (2)
-  const [optA, setOptA] = React.useState({ label: "", image_url: "" });
-  const [optB, setOptB] = React.useState({ label: "", image_url: "" });
+  // “Finaliza” explícito (porque next_question_id null es ambiguo)
+  const [ends, setEnds] = React.useState<Record<string, boolean>>({});
 
-  // Saved options from API
-  const [savedOptions, setSavedOptions] = React.useState<
-    Array<{ id: string; ord: number; label: string; image_url: string | null; next_question_id: string | null }>
-  >([]);
+  // Selection
+  const [selectedQid, setSelectedQid] = React.useState<string | null>(null);
 
-  // Queue of “edges” to resolve: for each option, define what comes next
-  const [pendingEdge, setPendingEdge] = React.useState<null | { optionId: string; optionLabel: string }>(null);
-
-  // Local tree for preview (simple)
-  const [nodes, setNodes] = React.useState<Array<{ id: string; subtitle: string; ord: number }>>([]);
-  const [edges, setEdges] = React.useState<Array<{ fromQuestionId: string; optionLabel: string; toQuestionId: string | null }>>([]);
-
-  const [nextOrd, setNextOrd] = React.useState(1); // ord de questions (incremental simple)
+  // Modal/inline create question from an option
+  const [linkFromOption, setLinkFromOption] = React.useState<{ optionId: string; fromQid: string } | null>(null);
+  const [newQTitle, setNewQTitle] = React.useState("¿Qué preferís?");
+  const [newQSubtitle, setNewQSubtitle] = React.useState("");
+  const [newA, setNewA] = React.useState({ label: "", image_url: "" });
+  const [newB, setNewB] = React.useState({ label: "", image_url: "" });
 
   const [shareUrl, setShareUrl] = React.useState<string | null>(null);
 
-  function resetWizard() {
-    setStep("meta");
-    setBusy(false);
-    setError(null);
-    setPlanId(null);
-    setQuestionId(null);
-    setTitle("");
-    setPersonName("");
-    setQSubtitle("");
-    setQTitle("¿Qué preferís?");
-    setOptA({ label: "", image_url: "" });
-    setOptB({ label: "", image_url: "" });
-    setSavedOptions([]);
-    setPendingEdge(null);
-    setNodes([]);
-    setEdges([]);
-    setNextOrd(1);
-    setShareUrl(null);
+  // ---------- helpers ----------
+  const optsForSelected = selectedQid ? (optionsByQuestion[selectedQid] || []) : [];
+
+  function optionIsResolved(o: OptionRow) {
+    // resuelta si: apunta a otra pregunta, o el usuario marcó “Finaliza”
+    return Boolean(o.next_question_id) || Boolean(ends[o.id]);
   }
 
-  // -------- actions ----------
+  const canPublish =
+    plan?.id &&
+    questions.length > 0 &&
+    questions.every((q) => (optionsByQuestion[q.id] || []).length === 2 && (optionsByQuestion[q.id] || []).every(optionIsResolved));
+
+  // Auto-layout simple por “profundidad” calculada desde start question
+  const layout = React.useMemo(() => {
+    const nodes = questions.slice().sort((a, b) => a.ord - b.ord);
+
+    const start = plan?.start_question_id || nodes[0]?.id || null;
+    const depth: Record<string, number> = {};
+    if (start) depth[start] = 0;
+
+    // BFS/propagación (ignora edges a null)
+    let changed = true;
+    let guard = 0;
+    while (changed && guard++ < 2000) {
+      changed = false;
+      for (const q of nodes) {
+        const d = depth[q.id];
+        if (d == null) continue;
+        const opts = optionsByQuestion[q.id] || [];
+        for (const o of opts) {
+          if (!o.next_question_id) continue;
+          const nd = d + 1;
+          const prev = depth[o.next_question_id];
+          if (prev == null || nd < prev) {
+            depth[o.next_question_id] = nd;
+            changed = true;
+          }
+        }
+      }
+    }
+
+    // Agrupar por depth para asignar y (fila)
+    const buckets: Record<number, QuestionRow[]> = {};
+    for (const q of nodes) {
+      const d = depth[q.id] ?? 0; // si no alcanzable, queda a la izquierda
+      (buckets[d] ||= []).push(q);
+    }
+    for (const d of Object.keys(buckets)) {
+      buckets[Number(d)].sort((a, b) => a.ord - b.ord);
+    }
+
+    const pos: Record<string, { x: number; y: number }> = {};
+    const colWidth = 360;
+    const rowHeight = 220;
+
+    Object.entries(buckets).forEach(([dStr, qs]) => {
+      const d = Number(dStr);
+      qs.forEach((q, i) => {
+        pos[q.id] = { x: d * colWidth, y: i * rowHeight };
+      });
+    });
+
+    return { start, depth, pos, colWidth, rowHeight };
+  }, [questions, optionsByQuestion, plan?.start_question_id]);
+
+  // ---------- API actions ----------
   async function createPlan() {
     setError(null);
     setBusy(true);
@@ -333,9 +367,12 @@ function Create({ session }: { session: Session }) {
         method: "POST",
         body: JSON.stringify({ title: title.trim(), person_name: personName.trim() || null }),
       });
-      setPlanId(data.id);
-      setNextOrd(1);
-      setStep("q");
+      setPlan(data);
+      setSelectedQid(null);
+      setQuestions([]);
+      setOptionsByQuestion({});
+      setEnds({});
+      setShareUrl(null);
     } catch (e: any) {
       setError(String(e.message || e));
     } finally {
@@ -343,52 +380,29 @@ function Create({ session }: { session: Session }) {
     }
   }
 
-  async function createQuestionAndOptions() {
-    if (!planId) return;
+  async function ensureFirstQuestion() {
+    if (!plan?.id) return;
     setError(null);
     setBusy(true);
     try {
-      const ord = nextOrd;
-
-      // 1) create question
+      const ord = 1;
       const q = await authedFetch("/api/private/question", {
         method: "POST",
-        body: JSON.stringify({
-          plan_id: planId,
-          ord,
-          title: qTitle.trim() || "¿Qué preferís?",
-          subtitle: qSubtitle.trim() || null,
-        }),
+        body: JSON.stringify({ plan_id: plan.id, ord, title: "¿Qué preferís?", subtitle: "Día o Noche" }),
       });
 
-      setQuestionId(q.id);
-      setNodes((prev) => [...prev, { id: q.id, subtitle: q.subtitle || "", ord }]);
-
-      // 2) create two options
-      const opts = await authedFetch("/api/private/options2", {
+      const opts: OptionRow[] = await authedFetch("/api/private/options2", {
         method: "POST",
         body: JSON.stringify({
           question_id: q.id,
-          a: { label: optA.label.trim(), image_url: optA.image_url.trim() || null },
-          b: { label: optB.label.trim(), image_url: optB.image_url.trim() || null },
+          a: { label: "Día", image_url: null },
+          b: { label: "Noche", image_url: null },
         }),
       });
 
-      // opts es array de 2
-      setSavedOptions(opts);
-
-      // 3) arrancamos resolución de branching con la opción ord=1
-      setResolvedOptionIds({});
-      const first = nextPendingOption(opts, {});
-      setPendingEdge(first ? { optionId: first.id, optionLabel: first.label } : null);
-
-      setStep("branch");
-      setNextOrd((x) => x + 1);
-
-      // limpiar form de próxima pregunta (por si crean otra)
-      setQSubtitle("");
-      setOptA({ label: "", image_url: "" });
-      setOptB({ label: "", image_url: "" });
+      setQuestions((prev) => [...prev, q]);
+      setOptionsByQuestion((prev) => ({ ...prev, [q.id]: opts }));
+      setSelectedQid(q.id);
     } catch (e: any) {
       setError(String(e.message || e));
     } finally {
@@ -396,109 +410,88 @@ function Create({ session }: { session: Session }) {
     }
   }
 
-async function setOptionNext(optionId: string, nextQuestionId: string | null, optionLabel: string) {
-  if (!questionId) return;
-  setError(null);
-  setBusy(true);
-  try {
-    await authedFetch(`/api/private/option/${encodeURIComponent(optionId)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ next_question_id: nextQuestionId }),
-    });
-
-    // guardar edge local para preview
-    setEdges((prev) => [
-      ...prev,
-      { fromQuestionId: questionId, optionLabel, toQuestionId: nextQuestionId },
-    ]);
-
-    // ✅ marcar resuelta
-    setResolvedOptionIds((prev) => {
-      const updated = { ...prev, [optionId]: true };
-
-      // elegir la próxima pendiente de ESTA pregunta
-      const nxt = nextPendingOption(savedOptions as any, updated);
-
-      if (nxt) {
-        setPendingEdge({ optionId: nxt.id, optionLabel: nxt.label });
-        setStep("branch");
-      } else {
-        setPendingEdge(null);
-        setStep("publish");
-      }
-
-      return updated;
-    });
-  } catch (e: any) {
-    setError(String(e.message || e));
-  } finally {
-    setBusy(false);
-  }
-}
-
-  async function createNextQuestionForPendingEdge() {
-    // Creamos una nueva pregunta (ord = nextOrd actual) y linkeamos la opción pendiente hacia esa pregunta
-    if (!planId || !pendingEdge) return;
-
-    // Creamos la pregunta+opciones usando el form actual, y luego hacemos PATCH de la opción pendiente
-    setError(null);
+  async function markEnd(optionId: string) {
     setBusy(true);
+    setError(null);
     try {
-      const ord = nextOrd;
+      // dejamos next_question_id explícitamente en null (y marcamos end local)
+      await authedFetch(`/api/private/option/${encodeURIComponent(optionId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ next_question_id: null }),
+      });
+      setEnds((prev) => ({ ...prev, [optionId]: true }));
+    } catch (e: any) {
+      setError(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openCreateFromOption(fromQid: string, optionId: string) {
+    setLinkFromOption({ fromQid, optionId });
+    setNewQTitle("¿Qué preferís?");
+    setNewQSubtitle("");
+    setNewA({ label: "", image_url: "" });
+    setNewB({ label: "", image_url: "" });
+  }
+
+  async function createQuestionFromOption() {
+    if (!plan?.id || !linkFromOption) return;
+    if (!newA.label.trim() || !newB.label.trim() || !newQSubtitle.trim()) {
+      setError("Completá subtítulo y las 2 opciones.");
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const nextOrd = (questions.reduce((m, q) => Math.max(m, q.ord), 0) || 0) + 1;
 
       const q = await authedFetch("/api/private/question", {
         method: "POST",
         body: JSON.stringify({
-          plan_id: planId,
-          ord,
-          title: qTitle.trim() || "¿Qué preferís?",
-          subtitle: qSubtitle.trim() || null,
+          plan_id: plan.id,
+          ord: nextOrd,
+          title: newQTitle.trim() || "¿Qué preferís?",
+          subtitle: newQSubtitle.trim(),
         }),
       });
 
-      // Linkear option -> new question
-      await authedFetch(`/api/private/option/${encodeURIComponent(pendingEdge.optionId)}`, {
+      const opts: OptionRow[] = await authedFetch("/api/private/options2", {
+        method: "POST",
+        body: JSON.stringify({
+          question_id: q.id,
+          a: { label: newA.label.trim(), image_url: newA.image_url.trim() || null },
+          b: { label: newB.label.trim(), image_url: newB.image_url.trim() || null },
+        }),
+      });
+
+      // Conectar la opción al nuevo nodo
+      await authedFetch(`/api/private/option/${encodeURIComponent(linkFromOption.optionId)}`, {
         method: "PATCH",
         body: JSON.stringify({ next_question_id: q.id }),
       });
 
-      // guardar edge local
-      if (questionId) {
-        setEdges((prev) => [
-          ...prev,
-          { fromQuestionId: questionId, optionLabel: pendingEdge.optionLabel, toQuestionId: q.id },
-        ]);
-      }
+      // Actualizar estado local
+      setQuestions((prev) => [...prev, q]);
+      setOptionsByQuestion((prev) => ({ ...prev, [q.id]: opts }));
 
-      // actualizar preview nodes
-      setNodes((prev) => [...prev, { id: q.id, subtitle: q.subtitle || "", ord }]);
-
-      // ahora la pregunta actual pasa a ser esta nueva, y hay que resolver sus dos opciones
-      setQuestionId(q.id);
-
-      const opts = await authedFetch("/api/private/options2", {
-        method: "POST",
-        body: JSON.stringify({
-          question_id: q.id,
-          a: { label: optA.label.trim(), image_url: optA.image_url.trim() || null },
-          b: { label: optB.label.trim(), image_url: optB.image_url.trim() || null },
-        }),
+      // Esta opción ya está resuelta (no es end)
+      setEnds((prev) => {
+        const copy = { ...prev };
+        delete copy[linkFromOption.optionId];
+        return copy;
       });
 
-      setSavedOptions(opts);
+      // También actualizamos la opción local del “fromQid”
+      setOptionsByQuestion((prev) => {
+        const fromOpts = prev[linkFromOption.fromQid] || [];
+        const updated = fromOpts.map((o) => (o.id === linkFromOption.optionId ? { ...o, next_question_id: q.id } : o));
+        return { ...prev, [linkFromOption.fromQid]: updated };
+      });
 
-      // próximo pending edge: opción ord=1 de la nueva pregunta
-      const first = opts.find((o: any) => o.ord === 1) || opts[0];
-      setPendingEdge({ optionId: first.id, optionLabel: first.label });
-
-      setNextOrd((x) => x + 1);
-
-      // limpiar para próxima
-      setQSubtitle("");
-      setOptA({ label: "", image_url: "" });
-      setOptB({ label: "", image_url: "" });
-
-      setStep("branch");
+      setSelectedQid(q.id);
+      setLinkFromOption(null);
     } catch (e: any) {
       setError(String(e.message || e));
     } finally {
@@ -507,11 +500,11 @@ async function setOptionNext(optionId: string, nextQuestionId: string | null, op
   }
 
   async function publish(expiresHours: number | null) {
-    if (!planId) return;
-    setError(null);
+    if (!plan?.id) return;
     setBusy(true);
+    setError(null);
     try {
-      const data = await authedFetch(`/api/private/plan/${encodeURIComponent(planId)}/publish`, {
+      const data = await authedFetch(`/api/private/plan/${encodeURIComponent(plan.id)}/publish`, {
         method: "PATCH",
         body: JSON.stringify({ expires_in_hours: expiresHours }),
       });
@@ -523,51 +516,106 @@ async function setOptionNext(optionId: string, nextQuestionId: string | null, op
     }
   }
 
-  // -------- UI ----------
-  const canMeta = title.trim().length > 0;
-  const canQuestion =
-    qSubtitle.trim().length > 0 &&
-    optA.label.trim().length > 0 &&
-    optB.label.trim().length > 0;
+  // ---------- UI components ----------
+  function NodeCard({ q }: { q: QuestionRow }) {
+    const pos = layout.pos[q.id] || { x: 0, y: 0 };
+    const selected = q.id === selectedQid;
+    const opts = optionsByQuestion[q.id] || [];
+    const complete = opts.length === 2 && opts.every(optionIsResolved);
 
-  function TreePreview() {
-    // preview simple: lista de nodos + edges
-    const byId = new Map(nodes.map((n) => [n.id, n]));
     return (
-      <div className="rounded-3xl border border-white/15 bg-white/5 p-5">
-        <div className="text-sm text-white/70">Vista árbol (preview)</div>
-        <div className="mt-3 space-y-2 text-sm">
-          {nodes
-            .slice()
-            .sort((a, b) => a.ord - b.ord)
-            .map((n) => {
-              const out = edges.filter((e) => e.fromQuestionId === n.id);
-              return (
-                <div key={n.id} className="rounded-2xl border border-white/10 bg-black/20 p-3">
-                  <div className="font-semibold">Q{n.ord}: {n.subtitle || "(sin subtítulo)"}</div>
-                  <div className="mt-2 space-y-1 text-white/80">
-                    {out.length === 0 ? (
-                      <div className="text-white/50">Sin conexiones aún</div>
-                    ) : (
-                      out.map((e, idx) => (
-                        <div key={idx}>
-                          • {e.optionLabel} →{" "}
-                          {e.toQuestionId ? `Q${byId.get(e.toQuestionId)?.ord ?? "?"}` : "Finaliza"}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+      <button
+        type="button"
+        onClick={() => setSelectedQid(q.id)}
+        style={{ transform: `translate(${pos.x}px, ${pos.y}px)` }}
+        className={
+          "absolute w-[320px] rounded-3xl border shadow-2xl text-left p-4 " +
+          (selected ? "border-white/50 bg-white/10" : "border-white/15 bg-white/5 hover:bg-white/10")
+        }
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs tracking-widest text-white/60">Q{q.ord}</div>
+          <div className={"text-xs px-2 py-1 rounded-full border " + (complete ? "border-emerald-400/40 text-emerald-200 bg-emerald-500/10" : "border-yellow-400/30 text-yellow-200 bg-yellow-500/10")}>
+            {complete ? "Completa" : "Incompleta"}
+          </div>
         </div>
-      </div>
+
+        <div className="mt-2 text-lg font-semibold">{q.title || "¿Qué preferís?"}</div>
+        <div className="text-white/70 text-sm mt-1">{q.subtitle || ""}</div>
+
+        <div className="mt-4 space-y-2">
+          {opts.slice().sort((a, b) => a.ord - b.ord).map((o) => {
+            const resolved = optionIsResolved(o);
+            const to = o.next_question_id ? `→ Q${(questions.find((x) => x.id === o.next_question_id)?.ord ?? "?")}` : (ends[o.id] ? "→ Fin" : "→ (sin definir)");
+            return (
+              <div key={o.id} className="flex items-center justify-between gap-2 text-sm">
+                <div className="text-white">{o.label}</div>
+                <div className={resolved ? "text-white/70" : "text-red-200"}>{to}</div>
+              </div>
+            );
+          })}
+        </div>
+      </button>
     );
   }
 
+  function EdgesLayer() {
+    // dibuja flechas desde cada opción al destino (si existe), o a un “fin” al lado
+    const paths: Array<{ d: string; key: string; unresolved?: boolean }> = [];
+
+    for (const q of questions) {
+      const fromPos = layout.pos[q.id];
+      if (!fromPos) continue;
+
+      const opts = (optionsByQuestion[q.id] || []).slice().sort((a, b) => a.ord - b.ord);
+      for (let i = 0; i < opts.length; i++) {
+        const o = opts[i];
+
+        // punto de salida por opción (dos “puertos”)
+        const x1 = fromPos.x + 320; // borde derecho del nodo
+        const y1 = fromPos.y + 140 + i * 22;
+
+        let x2 = x1 + 120;
+        let y2 = y1;
+
+        if (o.next_question_id && layout.pos[o.next_question_id]) {
+          const toPos = layout.pos[o.next_question_id];
+          x2 = toPos.x;         // borde izquierdo del nodo destino
+          y2 = toPos.y + 120;   // centro aproximado
+        }
+
+        const midX = (x1 + x2) / 2;
+
+        const d = `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
+        paths.push({ d, key: `${o.id}`, unresolved: !optionIsResolved(o) });
+      }
+    }
+
+    return (
+      <svg className="absolute inset-0 pointer-events-none" width="100%" height="100%" viewBox="0 0 3000 2000" preserveAspectRatio="none">
+        {paths.map((p) => (
+          <path
+            key={p.key}
+            d={p.d}
+            fill="none"
+            stroke="currentColor"
+            className={p.unresolved ? "text-red-300/50" : "text-white/30"}
+            strokeWidth="2"
+          />
+        ))}
+      </svg>
+    );
+  }
+
+  // Canvas size (simple): columnas * ancho + margen
+  const maxX = Math.max(0, ...Object.values(layout.pos).map((p) => p.x));
+  const maxY = Math.max(0, ...Object.values(layout.pos).map((p) => p.y));
+  const canvasW = maxX + 700;
+  const canvasH = maxY + 500;
+
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <header className="mx-auto max-w-6xl px-6 py-6 flex items-center justify-between">
+      <header className="mx-auto max-w-7xl px-6 py-6 flex items-center justify-between">
         <button className="text-lg font-semibold" onClick={() => navigate("/")}>
           Plan Invitación
         </button>
@@ -586,39 +634,59 @@ async function setOptionNext(optionId: string, nextQuestionId: string | null, op
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 pb-14">
-        <div className="flex flex-col md:flex-row gap-6">
-          <div className="flex-1">
-            <div className="rounded-3xl border border-white/15 bg-white/5 p-6">
-              <div className="text-xs tracking-widest text-white/60">CREAR PLAN</div>
+      <main className="mx-auto max-w-7xl px-6 pb-12">
+        {error && (
+          <div className="mb-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+            {error}
+          </div>
+        )}
 
-              {error && (
-                <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
-                  {error}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-6">
+          {/* CANVAS */}
+          <div className="rounded-3xl border border-white/15 bg-white/5 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+              <div>
+                <div className="text-xs tracking-widest text-white/60">CREADOR (CANVAS)</div>
+                <div className="text-sm text-white/80">
+                  {plan ? `${plan.title}${plan.person_name ? ` · para ${plan.person_name}` : ""}` : "Creá tu plan y armá el diagrama"}
                 </div>
-              )}
-
-              {/* Step indicator */}
-              <div className="mt-4 flex flex-wrap gap-2 text-xs">
-                <span className={"px-3 py-1 rounded-full border " + (step === "meta" ? "border-white/40 bg-white/10" : "border-white/10 text-white/60")}>
-                  1) Datos
-                </span>
-                <span className={"px-3 py-1 rounded-full border " + (step === "q" ? "border-white/40 bg-white/10" : "border-white/10 text-white/60")}>
-                  2) Pregunta
-                </span>
-                <span className={"px-3 py-1 rounded-full border " + (step === "branch" ? "border-white/40 bg-white/10" : "border-white/10 text-white/60")}>
-                  3) Branching
-                </span>
-                <span className={"px-3 py-1 rounded-full border " + (step === "publish" ? "border-white/40 bg-white/10" : "border-white/10 text-white/60")}>
-                  4) Publicar
-                </span>
               </div>
 
-              {/* Step: meta */}
-              {step === "meta" && (
-                <div className="mt-6 space-y-4">
+              <div className="flex items-center gap-2">
+                {!plan ? (
+                  <span className="text-xs text-white/60">Primero creá el plan</span>
+                ) : (
+                  <button
+                    disabled={busy}
+                    className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15 disabled:opacity-50"
+                    onClick={ensureFirstQuestion}
+                  >
+                    + Nodo inicial
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="relative overflow-auto" style={{ height: "calc(100vh - 220px)" }}>
+              <div className="relative" style={{ width: canvasW, height: canvasH, minWidth: "100%", minHeight: "100%" }}>
+                <EdgesLayer />
+                {questions.map((q) => (
+                  <NodeCard key={q.id} q={q} />
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* SIDE PANEL */}
+          <div className="space-y-6">
+            {/* Plan meta */}
+            <div className="rounded-3xl border border-white/15 bg-white/5 p-5">
+              <div className="text-sm font-semibold">Plan</div>
+
+              {!plan ? (
+                <div className="mt-4 space-y-3">
                   <div>
-                    <div className="text-sm text-white/70">Título del plan</div>
+                    <div className="text-sm text-white/70">Título</div>
                     <input
                       className="mt-2 w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
                       value={title}
@@ -628,7 +696,7 @@ async function setOptionNext(optionId: string, nextQuestionId: string | null, op
                   </div>
 
                   <div>
-                    <div className="text-sm text-white/70">Nombre de la persona (opcional)</div>
+                    <div className="text-sm text-white/70">Persona (opcional)</div>
                     <input
                       className="mt-2 w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
                       value={personName}
@@ -637,232 +705,184 @@ async function setOptionNext(optionId: string, nextQuestionId: string | null, op
                     />
                   </div>
 
-                  <div className="flex flex-wrap gap-3 pt-2">
-                    <button
-                      disabled={!canMeta || busy}
-                      className="rounded-2xl bg-white text-slate-950 px-5 py-3 text-sm font-semibold disabled:opacity-50"
-                      onClick={createPlan}
-                    >
-                      {busy ? "Creando…" : "Crear plan"}
-                    </button>
-                    <button
-                      className="rounded-2xl bg-white/10 border border-white/15 px-5 py-3 text-sm hover:bg-white/15"
-                      onClick={resetWizard}
-                      disabled={busy}
-                    >
-                      Limpiar
-                    </button>
-                  </div>
+                  <button
+                    disabled={busy || !title.trim()}
+                    className="w-full rounded-2xl bg-white text-slate-950 px-4 py-3 font-semibold disabled:opacity-50"
+                    onClick={createPlan}
+                  >
+                    {busy ? "Creando…" : "Crear plan"}
+                  </button>
                 </div>
-              )}
-
-              {/* Step: question */}
-              {step === "q" && (
-                <div className="mt-6 space-y-4">
-                  <div className="text-sm text-white/70">
-                    Pregunta #{nextOrd} (2 opciones). En tu UI pública se muestra el subtítulo como “Día o Noche”.
-                  </div>
-
-                  <div>
-                    <div className="text-sm text-white/70">Título (arriba grande)</div>
-                    <input
-                      className="mt-2 w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                      value={qTitle}
-                      onChange={(e) => setQTitle(e.target.value)}
-                      placeholder="¿Qué preferís?"
-                    />
-                  </div>
-
-                  <div>
-                    <div className="text-sm text-white/70">Subtítulo (la consigna)</div>
-                    <input
-                      className="mt-2 w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                      value={qSubtitle}
-                      onChange={(e) => setQSubtitle(e.target.value)}
-                      placeholder="Ej: Día o Noche"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-3">
-                      <div className="font-semibold">Opción A</div>
-                      <input
-                        className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                        value={optA.label}
-                        onChange={(e) => setOptA((p) => ({ ...p, label: e.target.value }))}
-                        placeholder="Ej: Día"
-                      />
-                      <input
-                        className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                        value={optA.image_url}
-                        onChange={(e) => setOptA((p) => ({ ...p, image_url: e.target.value }))}
-                        placeholder="URL de imagen (opcional)"
-                      />
-                    </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-3">
-                      <div className="font-semibold">Opción B</div>
-                      <input
-                        className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                        value={optB.label}
-                        onChange={(e) => setOptB((p) => ({ ...p, label: e.target.value }))}
-                        placeholder="Ej: Noche"
-                      />
-                      <input
-                        className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                        value={optB.image_url}
-                        onChange={(e) => setOptB((p) => ({ ...p, image_url: e.target.value }))}
-                        placeholder="URL de imagen (opcional)"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-3 pt-2">
-                    <button
-                      disabled={!canQuestion || busy}
-                      className="rounded-2xl bg-white text-slate-950 px-5 py-3 text-sm font-semibold disabled:opacity-50"
-                      onClick={createQuestionAndOptions}
-                    >
-                      {busy ? "Guardando…" : "Guardar pregunta"}
-                    </button>
-
-                    <button
-                      className="rounded-2xl bg-white/10 border border-white/15 px-5 py-3 text-sm hover:bg-white/15"
-                      onClick={() => navigate("/")}
-                      disabled={busy}
-                    >
-                      Salir
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Step: branching */}
-              {step === "branch" && (
-                <div className="mt-6 space-y-4">
-                  <div className="text-sm text-white/70">
-                    Definí qué pasa si eligen esta opción:
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                    <div className="text-xs text-white/60">Opción actual</div>
-                    <div className="text-2xl font-semibold mt-1">{pendingEdge?.optionLabel || "—"}</div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-3">
-                    <button
-                      disabled={busy || !pendingEdge}
-                      className="rounded-2xl bg-white text-slate-950 px-5 py-3 text-sm font-semibold disabled:opacity-50"
-                      onClick={() => {
-                        if (!pendingEdge) return;
-                        setOptionNext(pendingEdge.optionId, null, pendingEdge.optionLabel);
-                      }}
-                    >
-                      Finaliza
-                    </button>
-
-                    <button
-                      disabled={busy || !pendingEdge}
-                      className="rounded-2xl bg-white/10 border border-white/15 px-5 py-3 text-sm hover:bg-white/15 disabled:opacity-50"
-                      onClick={() => setStep("q")}
-                    >
-                      Crear nueva pregunta
-                    </button>
-                  </div>
-
-                  <div className="text-xs text-white/50">
-                    Si tocás “Crear nueva pregunta”, completás la pregunta siguiente y automáticamente se conecta a esta opción.
-                  </div>
-                </div>
-              )}
-
-              {/* Step: publish */}
-              {step === "publish" && (
-                <div className="mt-6 space-y-4">
-                  <div className="text-sm text-white/70">
-                    Ya definiste las 2 opciones de la última pregunta creada. Podés publicar y obtener el link.
-                  </div>
-
-                  <div className="flex flex-wrap gap-3">
-                    <button
-                      disabled={busy || !planId}
-                      className="rounded-2xl bg-white text-slate-950 px-5 py-3 text-sm font-semibold disabled:opacity-50"
-                      onClick={() => publish(null)}
-                    >
-                      {busy ? "Publicando…" : "Publicar (sin expiración)"}
-                    </button>
-                    <button
-                      disabled={busy || !planId}
-                      className="rounded-2xl bg-white/10 border border-white/15 px-5 py-3 text-sm hover:bg-white/15 disabled:opacity-50"
-                      onClick={() => publish(24)}
-                    >
-                      Publicar (expira en 24h)
-                    </button>
-                  </div>
-
-                  {shareUrl && (
-                    <div className="rounded-2xl border border-white/15 bg-white/5 p-4 space-y-2">
-                      <div className="text-sm text-white/80">Link para compartir</div>
-                      <div className="font-mono text-white">{window.location.origin}{shareUrl}</div>
-                      <button
-                        className="rounded-2xl bg-white text-slate-950 px-4 py-2 text-sm hover:opacity-90"
-                        onClick={async () => {
-                          await navigator.clipboard.writeText(`${window.location.origin}${shareUrl}`);
-                          alert("Copiado ✅");
-                        }}
-                      >
-                        Copiar link
-                      </button>
-                    </div>
-                  )}
-
-                  <div className="pt-2 flex flex-wrap gap-3">
-                    <button
-                      className="rounded-2xl bg-white/10 border border-white/15 px-5 py-3 text-sm hover:bg-white/15"
-                      onClick={resetWizard}
-                      disabled={busy}
-                    >
-                      Crear otro plan
-                    </button>
-                  </div>
+              ) : (
+                <div className="mt-3 text-sm text-white/70">
+                  Estado: <span className="text-white">{plan.status}</span>
                 </div>
               )}
             </div>
-          </div>
 
-          <div className="w-full md:w-[360px]">
-            <TreePreview />
+            {/* Node editor */}
+            <div className="rounded-3xl border border-white/15 bg-white/5 p-5">
+              <div className="text-sm font-semibold">Editor</div>
 
-            {/* Acción especial: cuando estamos en branching y el usuario eligió crear nueva pregunta,
-               volvemos a step=q, pero necesitamos linkear option->newQuestion al guardar.
-               Para eso, si step cambia a q desde branch, usamos createNextQuestionForPendingEdge en vez de createQuestionAndOptions.
-            */}
-            {step === "q" && pendingEdge && (
-              <div className="mt-4 rounded-3xl border border-white/15 bg-white/5 p-5">
-                <div className="text-sm text-white/70">Conexión pendiente</div>
-                <div className="mt-2 text-white">
-                  Esta nueva pregunta se conectará desde: <span className="font-semibold">{pendingEdge.optionLabel}</span>
+              {!selectedQid ? (
+                <div className="mt-3 text-white/70 text-sm">
+                  Seleccioná un nodo del canvas para editar sus conexiones.
                 </div>
+              ) : (
+                <div className="mt-4 space-y-4">
+                  <div className="text-sm text-white/70">
+                    {questions.find((q) => q.id === selectedQid)?.subtitle || "—"}
+                  </div>
 
-                <button
-                  disabled={!canQuestion || busy}
-                  className="mt-4 w-full rounded-2xl bg-white text-slate-950 px-5 py-3 text-sm font-semibold disabled:opacity-50"
-                  onClick={createNextQuestionForPendingEdge}
-                >
-                  {busy ? "Guardando…" : "Guardar y conectar"}
-                </button>
+                  {(optsForSelected.slice().sort((a, b) => a.ord - b.ord)).map((o) => {
+                    const resolved = optionIsResolved(o);
+                    const isEnd = Boolean(ends[o.id]);
+                    return (
+                      <div key={o.id} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="font-semibold">{o.label}</div>
+                          <div className={"text-xs px-2 py-1 rounded-full border " + (resolved ? "border-emerald-400/30 text-emerald-200 bg-emerald-500/10" : "border-red-400/30 text-red-200 bg-red-500/10")}>
+                            {resolved ? (isEnd ? "Fin" : "Conectada") : "Sin definir"}
+                          </div>
+                        </div>
 
-                <div className="mt-2 text-xs text-white/50">
-                  (Esto crea la pregunta+opciones y hace el PATCH de next_question_id automáticamente.)
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            disabled={busy}
+                            className="rounded-2xl bg-white/10 border border-white/15 px-3 py-2 text-sm hover:bg-white/15 disabled:opacity-50"
+                            onClick={() => openCreateFromOption(selectedQid, o.id)}
+                          >
+                            Crear pregunta y conectar
+                          </button>
+
+                          <button
+                            disabled={busy}
+                            className="rounded-2xl bg-white text-slate-950 px-3 py-2 text-sm font-semibold hover:opacity-90 disabled:opacity-50"
+                            onClick={() => markEnd(o.id)}
+                          >
+                            Finaliza
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {linkFromOption && (
+                    <div className="rounded-2xl border border-white/15 bg-white/5 p-4">
+                      <div className="text-sm font-semibold">Nueva pregunta (conectar)</div>
+                      <div className="mt-3 space-y-2">
+                        <input
+                          className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+                          value={newQTitle}
+                          onChange={(e) => setNewQTitle(e.target.value)}
+                          placeholder="¿Qué preferís?"
+                        />
+                        <input
+                          className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+                          value={newQSubtitle}
+                          onChange={(e) => setNewQSubtitle(e.target.value)}
+                          placeholder="Ej: Cena mexicana o china"
+                        />
+
+                        <div className="grid grid-cols-1 gap-2">
+                          <input
+                            className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+                            value={newA.label}
+                            onChange={(e) => setNewA((p) => ({ ...p, label: e.target.value }))}
+                            placeholder="Opción A"
+                          />
+                          <input
+                            className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+                            value={newA.image_url}
+                            onChange={(e) => setNewA((p) => ({ ...p, image_url: e.target.value }))}
+                            placeholder="URL imagen A (opcional)"
+                          />
+                          <input
+                            className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+                            value={newB.label}
+                            onChange={(e) => setNewB((p) => ({ ...p, label: e.target.value }))}
+                            placeholder="Opción B"
+                          />
+                          <input
+                            className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+                            value={newB.image_url}
+                            onChange={(e) => setNewB((p) => ({ ...p, image_url: e.target.value }))}
+                            placeholder="URL imagen B (opcional)"
+                          />
+                        </div>
+
+                        <div className="flex gap-2">
+                          <button
+                            disabled={busy}
+                            className="flex-1 rounded-2xl bg-white text-slate-950 px-4 py-3 font-semibold disabled:opacity-50"
+                            onClick={createQuestionFromOption}
+                          >
+                            {busy ? "Creando…" : "Crear y conectar"}
+                          </button>
+                          <button
+                            disabled={busy}
+                            className="rounded-2xl bg-white/10 border border-white/15 px-4 py-3"
+                            onClick={() => setLinkFromOption(null)}
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
+              )}
+            </div>
+
+            {/* Publish */}
+            <div className="rounded-3xl border border-white/15 bg-white/5 p-5">
+              <div className="text-sm font-semibold">Publicar</div>
+              <div className="mt-2 text-sm text-white/70">
+                {canPublish ? "Listo para publicar ✅" : "Faltan conexiones (cada opción debe ir a otra pregunta o finalizar)."}
               </div>
-            )}
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  disabled={busy || !canPublish}
+                  className="rounded-2xl bg-white text-slate-950 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                  onClick={() => publish(null)}
+                >
+                  Publicar
+                </button>
+                <button
+                  disabled={busy || !canPublish}
+                  className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15 disabled:opacity-50"
+                  onClick={() => publish(24)}
+                >
+                  Publicar (24h)
+                </button>
+              </div>
+
+              {shareUrl && (
+                <div className="mt-4 rounded-2xl border border-white/15 bg-black/20 p-3">
+                  <div className="text-xs text-white/60">Link</div>
+                  <div className="mt-1 font-mono text-sm break-all">
+                    {window.location.origin}{shareUrl}
+                  </div>
+                  <button
+                    className="mt-3 rounded-2xl bg-white text-slate-950 px-4 py-2 text-sm font-semibold"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(`${window.location.origin}${shareUrl}`);
+                      alert("Copiado ✅");
+                    }}
+                  >
+                    Copiar
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </main>
     </div>
   );
 }
+
 
 
 function Expired() {
@@ -1149,7 +1169,7 @@ export default function App() {
       navigate("/login");
       return null;
     }
-    return <Create session={session} />;
+    return <CreateCanvas session={session} />;
   }
 
   return <Home session={session} />;
