@@ -175,7 +175,7 @@ export default {
         if (!ok) return json({ status: "error", detail: data }, 400);
         return json(data?.[0] ?? data);
       }
-// ✅ PATCH /api/private/plan/:id/message_template
+// PATCH /api/private/plan/:id/message_template
 if (
   request.method === "PATCH" &&
   url.pathname.startsWith("/api/private/plan/") &&
@@ -185,7 +185,7 @@ if (
   if (!token) return json({ status: "unauthorized" }, 401);
 
   const parts = url.pathname.split("/");
-  const planId = parts[4]; // /api/private/plan/:id/message_template
+  const planId = parts[4];
   if (!planId) return json({ status: "missing_plan_id" }, 400);
 
   const body = await request.json().catch(() => null);
@@ -195,9 +195,7 @@ if (
   if (typeof body.message_title_template === "string") patch.message_title_template = body.message_title_template;
   if (typeof body.message_body_template === "string") patch.message_body_template = body.message_body_template;
 
-  if (Object.keys(patch).length === 0) {
-    return json({ status: "missing_patch_fields" }, 400);
-  }
+  if (Object.keys(patch).length === 0) return json({ status: "missing_patch_fields" }, 400);
 
   const { ok, data } = await supabaseRest(
     env,
@@ -209,6 +207,7 @@ if (
   if (!ok) return json({ status: "error", detail: data }, 400);
   return json(data?.[0] ?? data);
 }
+
 
       // ✅ PATCH /api/private/plan/:id/templates
 // body: { invite_title_template?: string|null, invite_body_template?: string|null }
