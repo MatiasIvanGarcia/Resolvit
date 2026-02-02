@@ -272,6 +272,16 @@ function CreateLinear({ session }: { session: Session }) {
   const [title, setTitle] = React.useState("");
   const [personName, setPersonName] = React.useState("");
 
+  const [messageTitleTpl, setMessageTitleTpl] = React.useState(
+  "Te invito #persona a que pasemos #plan juntos"
+);
+
+const [messageBodyTpl, setMessageBodyTpl] = React.useState(
+  "Hola #persona!!\n\n¿Te copás a #decision1?\n\nTe espero!!"
+);
+
+const [savingTemplate, setSavingTemplate] = React.useState(false);
+
   const [questions, setQuestions] = React.useState<QuestionRow[]>([]);
   const [optionsByQuestion, setOptionsByQuestion] = React.useState<Record<string, OptionRow[]>>({});
   const [shareUrl, setShareUrl] = React.useState<string | null>(null);
@@ -493,6 +503,29 @@ function CreateLinear({ session }: { session: Session }) {
       setBusy(false);
     }
   }
+async function saveMessageTemplate() {
+  if (!plan?.id) return;
+
+  setSavingTemplate(true);
+  setError(null);
+
+  try {
+    await authedFetch(
+      `/api/private/plan/${encodeURIComponent(plan.id)}/message_template`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          message_title_template: messageTitleTpl,
+          message_body_template: messageBodyTpl,
+        }),
+      }
+    );
+  } catch (e: any) {
+    setError(String(e.message || e));
+  } finally {
+    setSavingTemplate(false);
+  }
+}
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -731,6 +764,47 @@ function CreateLinear({ session }: { session: Session }) {
                 </div>
               </div>
             </div>
+            {/* MENSAJE FINAL */}
+<div className="rounded-3xl border border-white/15 bg-white/5 p-5">
+  <div className="text-sm font-semibold">Mensaje final</div>
+
+  <div className="mt-3 text-xs text-white/60">
+    Variables disponibles:
+    <span className="ml-2">#persona</span>
+    <span className="ml-2">#plan</span>
+    {sortedQuestions.map((_, i) => (
+      <span key={i} className="ml-2">#decision{i + 1}</span>
+    ))}
+  </div>
+
+  <div className="mt-3">
+    <div className="text-xs text-white/60 mb-1">Título</div>
+    <input
+      className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+      value={messageTitleTpl}
+      onChange={(e) => setMessageTitleTpl(e.target.value)}
+    />
+  </div>
+
+  <div className="mt-3">
+    <div className="text-xs text-white/60 mb-1">Cuerpo</div>
+    <textarea
+      rows={8}
+      className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none resize-none"
+      value={messageBodyTpl}
+      onChange={(e) => setMessageBodyTpl(e.target.value)}
+    />
+  </div>
+
+  <button
+    disabled={savingTemplate}
+    onClick={saveMessageTemplate}
+    className="mt-4 rounded-2xl bg-white text-slate-950 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+  >
+    {savingTemplate ? "Guardando…" : "Guardar mensaje"}
+  </button>
+</div>
+
 
             {/* PUBLICAR */}
             <div className="rounded-3xl border border-white/15 bg-white/5 p-5">
