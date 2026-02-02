@@ -176,6 +176,47 @@ export default {
         return json(data?.[0] ?? data);
       }
 
+      // ✅ PATCH /api/private/plan/:id/templates
+// body: { invite_title_template?: string|null, invite_body_template?: string|null }
+if (
+  request.method === "PATCH" &&
+  url.pathname.startsWith("/api/private/plan/") &&
+  url.pathname.endsWith("/templates")
+) {
+  const token = getAuthToken(request);
+  if (!token) return json({ status: "unauthorized" }, 401);
+
+  const parts = url.pathname.split("/");
+  const planId = parts[4]; // /api/private/plan/:id/templates
+  if (!planId) return json({ status: "missing_plan_id" }, 400);
+
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body !== "object") return json({ status: "bad_json" }, 400);
+
+  const patch: any = {};
+  if ("invite_title_template" in body) patch.invite_title_template = body.invite_title_template ?? null;
+  if ("invite_body_template" in body) patch.invite_body_template = body.invite_body_template ?? null;
+
+  if (Object.keys(patch).length === 0) {
+    return json({ status: "missing_patch_fields" }, 400);
+  }
+
+  const { ok, data } = await supabaseRest(
+    env,
+    `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}&select=id,invite_title_template,invite_body_template`,
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch),
+    },
+    token
+  );
+
+  if (!ok) return json({ status: "error", detail: data }, 400);
+  return json(data?.[0] ?? data);
+}
+
+
       // ✅ PATCH /api/private/question/:id { title?, subtitle?, ord? }
       if (request.method === "PATCH" && url.pathname.startsWith("/api/private/question/")) {
         const token = getAuthToken(request);
@@ -249,7 +290,7 @@ export default {
 
         const body = await request.json().catch(() => null);
         if (!body?.question_id) return json({ status: "missing_question_id" }, 400);
-        if (!body?.a?.label || !body?.b?.label) return json({ status: "missing_labels" }, 400);
+        if (body?.a?.label == null || body?.b?.label == null) return json({ status: "missing_labels" }, 400);
 
         const payload = [
           { question_id: body.question_id, ord: 1, label: body.a.label, image_url: body.a.image_url ?? null },
