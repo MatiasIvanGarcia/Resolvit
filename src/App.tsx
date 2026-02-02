@@ -239,16 +239,16 @@ function Login() {
 }
 
 function CreateLinear({ session }: { session: Session }) {
-  type PlanRow = { id: string; title: string; person_name: string | null; status: string };
-  type QuestionRow = { id: string; plan_id: string; ord: number; title: string; subtitle: string | null };
-  type OptionRow = {
+  type PlanRow = {
     id: string;
-    question_id: string;
-    ord: number;
-    label: string;
-    image_url: string | null;
-    next_question_id: string | null;
+    title: string;
+    person_name: string | null;
+    status: string;
+    invite_title_template?: string | null;
+    invite_body_template?: string | null;
   };
+  type QuestionRow = { id: string; plan_id: string; ord: number; title: string; subtitle: string | null };
+  type OptionRow = { id: string; question_id: string; ord: number; label: string; image_url: string | null; next_question_id: string | null };
 
   async function authedFetch(path: string, init?: RequestInit) {
     const token = session.access_token;
@@ -260,14 +260,8 @@ function CreateLinear({ session }: { session: Session }) {
         "content-type": "application/json",
       },
     });
-
     const data = await res.json().catch(() => null);
-    if (!res.ok) {
-      // Mensaje más legible
-      const detail =
-        (data && (data.detail || data.error || data.message || data.status)) ? JSON.stringify(data) : `HTTP ${res.status}`;
-      throw new Error(detail);
-    }
+    if (!res.ok) throw new Error(data ? JSON.stringify(data) : "Request failed");
     return data;
   }
 
@@ -282,24 +276,85 @@ function CreateLinear({ session }: { session: Session }) {
   const [optionsByQuestion, setOptionsByQuestion] = React.useState<Record<string, OptionRow[]>>({});
   const [shareUrl, setShareUrl] = React.useState<string | null>(null);
 
+  // Templates editor state
+  const DEFAULT_TITLE_TMPL = "Te invito #persona a que pasemos #plan juntos";
+  const DEFAULT_BODY_TMPL = "Hola #persona!!\n\n¿Te copás a #decision1?\n\nTe espero!!";
+  const [inviteTitleTmpl, setInviteTitleTmpl] = React.useState(DEFAULT_TITLE_TMPL);
+  const [inviteBodyTmpl, setInviteBodyTmpl] = React.useState(DEFAULT_BODY_TMPL);
+  const [saveMsg, setSaveMsg] = React.useState<string | null>(null);
+
+  const titleRef = React.useRef<HTMLInputElement | null>(null);
+  const bodyRef = React.useRef<HTMLTextAreaElement | null>(null);
+
   const sortedQuestions = React.useMemo(() => questions.slice().sort((a, b) => a.ord - b.ord), [questions]);
 
   function getOpts(qid: string) {
     return (optionsByQuestion[qid] || []).slice().sort((a, b) => a.ord - b.ord);
   }
 
-  function uiLabel(label: string) {
-    return label === EMPTY ? "" : label;
-  }
-
   function isComplete(q: QuestionRow) {
     const opts = getOpts(q.id);
-    return Boolean(q.subtitle?.trim()) &&
-      opts.length === 2 &&
-      opts.every((o) => uiLabel(o.label).trim().length > 0);
+    return Boolean(q.subtitle?.trim()) && opts.length === 2 && opts.every((o) => o.label.trim().length > 0);
   }
 
   const canPublish = plan?.id && sortedQuestions.length > 0 && sortedQuestions.every(isComplete);
+
+  function variablesList() {
+    const vars = ["#plan", "#persona"];
+    for (const q of sortedQuestions) vars.push(`#decision${q.ord}`);
+    return vars;
+  }
+
+  function insertAtCursor(target: "title" | "body", token: string) {
+    if (target === "title") {
+      const el = titleRef.current;
+      if (!el) return;
+      const start = el.selectionStart ?? inviteTitleTmpl.length;
+      const end = el.selectionEnd ?? inviteTitleTmpl.length;
+      const next = inviteTitleTmpl.slice(0, start) + token + inviteTitleTmpl.slice(end);
+      setInviteTitleTmpl(next);
+      requestAnimationFrame(() => {
+        el.focus();
+        const pos = start + token.length;
+        el.setSelectionRange(pos, pos);
+      });
+    } else {
+      const el = bodyRef.current;
+      if (!el) return;
+      const start = el.selectionStart ?? inviteBodyTmpl.length;
+      const end = el.selectionEnd ?? inviteBodyTmpl.length;
+      const next = inviteBodyTmpl.slice(0, start) + token + inviteBodyTmpl.slice(end);
+      setInviteBodyTmpl(next);
+      requestAnimationFrame(() => {
+        el.focus();
+        const pos = start + token.length;
+        el.setSelectionRange(pos, pos);
+      });
+    }
+  }
+
+  async function saveTemplates() {
+    if (!plan?.id) return;
+    setBusy(true);
+    setError(null);
+    setSaveMsg(null);
+    try {
+      const data = await authedFetch(`/api/private/plan/${encodeURIComponent(plan.id)}/templates`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          invite_title_template: inviteTitleTmpl,
+          invite_body_template: inviteBodyTmpl,
+        }),
+      });
+      setPlan((p) => (p ? { ...p, ...data } : p));
+      setSaveMsg("Guardado ✅");
+      window.setTimeout(() => setSaveMsg(null), 1500);
+    } catch (e: any) {
+      setError(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function createPlan() {
     setError(null);
@@ -313,6 +368,19 @@ function CreateLinear({ session }: { session: Session }) {
       setQuestions([]);
       setOptionsByQuestion({});
       setShareUrl(null);
+
+      // set defaults templates
+      setInviteTitleTmpl(DEFAULT_TITLE_TMPL);
+      setInviteBodyTmpl(DEFAULT_BODY_TMPL);
+
+      // guardar defaults en backend
+      await authedFetch(`/api/private/plan/${encodeURIComponent(data.id)}/templates`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          invite_title_template: DEFAULT_TITLE_TMPL,
+          invite_body_template: DEFAULT_BODY_TMPL,
+        }),
+      });
     } catch (e: any) {
       setError(String(e.message || e));
     } finally {
@@ -337,13 +405,13 @@ function CreateLinear({ session }: { session: Session }) {
         }),
       });
 
-      // IMPORTANTE: labels no vacíos para evitar missing_labels en Worker
+      // 👇 labels vacíos (no texto “Opción 1/2”), el placeholder lo muestra el input
       const opts: OptionRow[] = await authedFetch("/api/private/options2", {
         method: "POST",
         body: JSON.stringify({
           question_id: q.id,
-          a: { label: EMPTY, image_url: null },
-          b: { label: EMPTY, image_url: null },
+          a: { label: "", image_url: null },
+          b: { label: "", image_url: null },
         }),
       });
 
@@ -365,9 +433,7 @@ function CreateLinear({ session }: { session: Session }) {
       });
       setQuestions((prev) => prev.map((q) => (q.id === qid ? { ...q, ...updated } : q)));
     } catch (e: any) {
-      setError(
-        `No se pudo guardar la pregunta. Si ves 405, falta implementar PATCH en el Worker.\n${String(e.message || e)}`
-      );
+      setError(String(e.message || e));
     }
   }
 
@@ -385,9 +451,7 @@ function CreateLinear({ session }: { session: Session }) {
         return copy;
       });
     } catch (e: any) {
-      setError(
-        `No se pudo eliminar. Si ves 405, falta implementar DELETE en el Worker.\n${String(e.message || e)}`
-      );
+      setError(String(e.message || e));
     } finally {
       setBusy(false);
     }
@@ -414,11 +478,15 @@ function CreateLinear({ session }: { session: Session }) {
     setBusy(true);
     setError(null);
     try {
+      // aseguro guardar templates antes de publicar
+      await saveTemplates();
+
       const data = await authedFetch(`/api/private/plan/${encodeURIComponent(plan.id)}/publish`, {
         method: "PATCH",
         body: JSON.stringify({ expires_in_hours: expiresHours }),
       });
       setShareUrl(data.share_url || null);
+      setPlan((p) => (p ? { ...p, status: "published" } : p));
     } catch (e: any) {
       setError(String(e.message || e));
     } finally {
@@ -489,9 +557,7 @@ function CreateLinear({ session }: { session: Session }) {
         {plan && (
           <div className="mt-6 space-y-4">
             {sortedQuestions.map((q, idx) => {
-              const opts = getOpts(q.id);
-              const o1 = opts[0];
-              const o2 = opts[1];
+              const [o1, o2] = getOpts(q.id);
               const complete = isComplete(q);
 
               return (
@@ -532,34 +598,28 @@ function CreateLinear({ session }: { session: Session }) {
                         const v = e.target.value;
                         setQuestions((prev) => prev.map((x) => (x.id === q.id ? { ...x, subtitle: v } : x)));
                       }}
-                      onBlur={(e) => patchQuestion(q.id, { subtitle: e.currentTarget.value } as any)}
+                      onBlur={() => patchQuestion(q.id, { subtitle: q.subtitle ?? "" } as any)}
                       placeholder="Ej: ¿Qué horario te gustaría?"
                     />
                   </div>
 
                   <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Izquierda */}
+                    {/* Opción 1 */}
                     <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
                       <div className="text-xs text-white/60 mb-2">Opción izquierda</div>
-
                       <input
                         className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                        value={uiLabel(o1?.label ?? "")}
+                        value={o1?.label ?? ""}
                         onChange={(e) => {
                           const v = e.target.value;
                           setOptionsByQuestion((prev) => ({
                             ...prev,
-                            [q.id]: (prev[q.id] || []).map((o) => (o.id === o1?.id ? { ...o, label: v || EMPTY } : o)),
+                            [q.id]: (prev[q.id] || []).map((o) => (o.id === o1?.id ? { ...o, label: v } : o)),
                           }));
                         }}
-                        onBlur={(e) => {
-                          if (!o1) return;
-                          const v = e.currentTarget.value.trim();
-                          patchOption(q.id, o1.id, { label: v.length ? v : EMPTY } as any);
-                        }}
-                        placeholder="Escribí la opción izquierda…"
+                        onBlur={() => o1 && patchOption(q.id, o1.id, { label: o1.label ?? "" } as any)}
+                        placeholder="Escribí la opción izquierda..."
                       />
-
                       <input
                         className="mt-2 w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
                         value={o1?.image_url ?? ""}
@@ -570,33 +630,27 @@ function CreateLinear({ session }: { session: Session }) {
                             [q.id]: (prev[q.id] || []).map((o) => (o.id === o1?.id ? { ...o, image_url: v || null } : o)),
                           }));
                         }}
-                        onBlur={(e) => o1 && patchOption(q.id, o1.id, { image_url: e.currentTarget.value || null } as any)}
+                        onBlur={() => o1 && patchOption(q.id, o1.id, { image_url: o1.image_url ?? null } as any)}
                         placeholder="URL imagen (opcional)"
                       />
                     </div>
 
-                    {/* Derecha */}
+                    {/* Opción 2 */}
                     <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
                       <div className="text-xs text-white/60 mb-2">Opción derecha</div>
-
                       <input
                         className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                        value={uiLabel(o2?.label ?? "")}
+                        value={o2?.label ?? ""}
                         onChange={(e) => {
                           const v = e.target.value;
                           setOptionsByQuestion((prev) => ({
                             ...prev,
-                            [q.id]: (prev[q.id] || []).map((o) => (o.id === o2?.id ? { ...o, label: v || EMPTY } : o)),
+                            [q.id]: (prev[q.id] || []).map((o) => (o.id === o2?.id ? { ...o, label: v } : o)),
                           }));
                         }}
-                        onBlur={(e) => {
-                          if (!o2) return;
-                          const v = e.currentTarget.value.trim();
-                          patchOption(q.id, o2.id, { label: v.length ? v : EMPTY } as any);
-                        }}
-                        placeholder="Escribí la opción derecha…"
+                        onBlur={() => o2 && patchOption(q.id, o2.id, { label: o2.label ?? "" } as any)}
+                        placeholder="Escribí la opción derecha..."
                       />
-
                       <input
                         className="mt-2 w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
                         value={o2?.image_url ?? ""}
@@ -607,7 +661,7 @@ function CreateLinear({ session }: { session: Session }) {
                             [q.id]: (prev[q.id] || []).map((o) => (o.id === o2?.id ? { ...o, image_url: v || null } : o)),
                           }));
                         }}
-                        onBlur={(e) => o2 && patchOption(q.id, o2.id, { image_url: e.currentTarget.value || null } as any)}
+                        onBlur={() => o2 && patchOption(q.id, o2.id, { image_url: o2.image_url ?? null } as any)}
                         placeholder="URL imagen (opcional)"
                       />
                     </div>
@@ -623,6 +677,68 @@ function CreateLinear({ session }: { session: Session }) {
             >
               + Agregar decisión
             </button>
+
+            {/* INVITACIÓN FINAL */}
+            <div className="rounded-3xl border border-white/15 bg-white/5 p-5">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold">Invitación final</div>
+                <div className="text-xs text-white/60">{saveMsg ?? ""}</div>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                <input
+                  ref={titleRef}
+                  className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+                  value={inviteTitleTmpl}
+                  onChange={(e) => setInviteTitleTmpl(e.target.value)}
+                />
+
+                <textarea
+                  ref={bodyRef}
+                  className="w-full min-h-[140px] rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none whitespace-pre-wrap"
+                  value={inviteBodyTmpl}
+                  onChange={(e) => setInviteBodyTmpl(e.target.value)}
+                />
+
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                  <div className="text-xs text-white/60 mb-2">Variables (click para insertar)</div>
+                  <div className="flex flex-wrap gap-2">
+                    {variablesList().map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs hover:bg-white/10"
+                        onClick={() => {
+                          // inserta en el body por defecto (más útil)
+                          insertAtCursor("body", v);
+                        }}
+                      >
+                        {v}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15 disabled:opacity-50"
+                      onClick={() => insertAtCursor("title", "#persona")}
+                    >
+                      Insertar #persona en título
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      className="rounded-2xl bg-white text-slate-950 px-4 py-2 text-sm font-semibold hover:opacity-90 disabled:opacity-50"
+                      onClick={saveTemplates}
+                    >
+                      Guardar mensaje
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             {/* PUBLICAR */}
             <div className="rounded-3xl border border-white/15 bg-white/5 p-5">
@@ -673,7 +789,6 @@ function CreateLinear({ session }: { session: Session }) {
     </div>
   );
 }
-
 function Expired() {
   return (
     <div className="min-h-screen bg-slate-950 text-white p-8">
