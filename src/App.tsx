@@ -722,14 +722,6 @@ function CreateLinear({ session }: { session: Session }) {
                     <button
                       type="button"
                       disabled={busy}
-                      className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15 disabled:opacity-50"
-                      onClick={() => insertAtCursor("title", "#persona")}
-                    >
-                      Insertar #persona en título
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
                       className="rounded-2xl bg-white text-slate-950 px-4 py-2 text-sm font-semibold hover:opacity-90 disabled:opacity-50"
                       onClick={saveTemplates}
                     >
@@ -754,13 +746,6 @@ function CreateLinear({ session }: { session: Session }) {
                   onClick={() => publish(null)}
                 >
                   Publicar
-                </button>
-                <button
-                  disabled={busy || !canPublish}
-                  className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15 disabled:opacity-50"
-                  onClick={() => publish(24)}
-                >
-                  Publicar (24h)
                 </button>
               </div>
 
