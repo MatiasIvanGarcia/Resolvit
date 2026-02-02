@@ -928,7 +928,7 @@ function Invite() {
         const data = (await res.json()) as PublicPlan;
         if (!cancelled) setPlan(data);
       } catch {
-        if (!cancelled) setPlan({ status: "error" });
+        if (!cancelled) setPlan({ status: "error" } as any);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -984,80 +984,104 @@ function Invite() {
     }, 220);
   }
 
+  // ✅ Fondo full-screen tomado del plan
+  const bgUrl = (plan.plan as any).background_image_url ?? null;
+
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      <div className="mx-auto max-w-6xl px-5 py-7 md:py-10">
-        <header className="flex items-center justify-between gap-4">
-          <div>
-            <div className="text-xs tracking-widest text-white/60">INVITACIÓN</div>
-            <div className="text-lg md:text-xl font-semibold">
-              {plan.plan.person_name ? `Plan para ${plan.plan.person_name}` : plan.plan.title}
+    <div className="min-h-screen text-white relative overflow-hidden">
+      {/* ✅ Fondo wallpaper (atrás de todo) */}
+      {bgUrl ? (
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage: `url(${bgUrl})`,
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            backgroundRepeat: "no-repeat",
+          }}
+        />
+      ) : (
+        <div className="absolute inset-0 bg-slate-950" />
+      )}
+
+      {/* ✅ Overlay para que se lea (subí/bajá opacidad) */}
+      <div className="absolute inset-0 bg-slate-950/55" />
+
+      {/* ✅ Contenido arriba del fondo */}
+      <div className="relative">
+        <div className="mx-auto max-w-6xl px-5 py-7 md:py-10">
+          <header className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-xs tracking-widest text-white/60">INVITACIÓN</div>
+              <div className="text-lg md:text-xl font-semibold">
+                {plan.plan.person_name ? `Plan para ${plan.plan.person_name}` : plan.plan.title}
+              </div>
             </div>
-          </div>
-          <button
-            className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
-            onClick={restart}
-          >
-            Reiniciar
-          </button>
-        </header>
+            <button
+              className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
+              onClick={restart}
+            >
+              Reiniciar
+            </button>
+          </header>
 
-        <main className="mt-7">
-          <AnimatePresence mode="wait">
-            {!done ? (
-              <motion.section
-                key={q.id}
-                {...fadeSlide}
-                transition={{ duration: 0.35, ease: "easeOut" }}
-                className="space-y-5"
-              >
-                <div className="space-y-1">
-                  <div className="text-3xl md:text-5xl font-semibold leading-tight">
-                    {q.title || "¿Qué preferís?"}
+          <main className="mt-7">
+            <AnimatePresence mode="wait">
+              {!done ? (
+                <motion.section
+                  key={q.id}
+                  {...fadeSlide}
+                  transition={{ duration: 0.35, ease: "easeOut" }}
+                  className="space-y-5"
+                >
+                  <div className="space-y-1">
+                    <div className="text-3xl md:text-5xl font-semibold leading-tight">
+                      {q.title || "¿Qué preferís?"}
+                    </div>
+                    <div className="text-white/70 text-base md:text-lg">{q.subtitle || ""}</div>
+                    <div className="text-xs text-white/60 mt-1">
+                      {idx + 1} / {total}
+                    </div>
                   </div>
-                  <div className="text-white/70 text-base md:text-lg">{q.subtitle || ""}</div>
-                  <div className="text-xs text-white/60 mt-1">
-                    {idx + 1} / {total}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {q.options
+                      .slice()
+                      .sort((a, b) => a.ord - b.ord)
+                      .slice(0, 2)
+                      .map((o) => (
+                        <OptionCard
+                          key={o.id}
+                          label={o.label === EMPTY ? "" : o.label || ""}
+                          imageUrl={o.image_url}
+                          disabled={busy}
+                          onPick={() => pick(o.id)}
+                        />
+                      ))}
                   </div>
-                </div>
+                </motion.section>
+              ) : (
+                <motion.section
+                  key="result"
+                  {...fadeSlide}
+                  transition={{ duration: 0.35, ease: "easeOut" }}
+                  className="space-y-5"
+                >
+                  <div className="space-y-2">
+                    <div className="text-3xl md:text-5xl font-semibold leading-tight">Listo 😄</div>
+                    <div className="text-white/70 text-base md:text-lg">Acá está tu invitación final.</div>
+                  </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  {q.options
-                    .slice()
-                    .sort((a, b) => a.ord - b.ord)
-                    .slice(0, 2)
-                    .map((o) => (
-                      <OptionCard
-                        key={o.id}
-                        label={o.label === EMPTY ? "" : (o.label || "")}
-                        imageUrl={o.image_url}
-                        disabled={busy}
-                        onPick={() => pick(o.id)}
-                      />
-                    ))}
-                </div>
-              </motion.section>
-            ) : (
-              <motion.section
-                key="result"
-                {...fadeSlide}
-                transition={{ duration: 0.35, ease: "easeOut" }}
-                className="space-y-5"
-              >
-                <div className="space-y-2">
-                  <div className="text-3xl md:text-5xl font-semibold leading-tight">Listo 😄</div>
-                  <div className="text-white/70 text-base md:text-lg">Acá está tu invitación final.</div>
-                </div>
-
-                <div className="rounded-3xl border border-white/15 bg-white/5 p-5 md:p-7 shadow-2xl">
-                  <pre className="whitespace-pre-wrap text-base md:text-lg leading-relaxed text-white/90">
-                    {result?.invitation_text || "Generando…"}
-                  </pre>
-                </div>
-              </motion.section>
-            )}
-          </AnimatePresence>
-        </main>
+                  <div className="rounded-3xl border border-white/15 bg-white/5 p-5 md:p-7 shadow-2xl">
+                    <pre className="whitespace-pre-wrap text-base md:text-lg leading-relaxed text-white/90">
+                      {result?.invitation_text || "Generando…"}
+                    </pre>
+                  </div>
+                </motion.section>
+              )}
+            </AnimatePresence>
+          </main>
+        </div>
       </div>
     </div>
   );
