@@ -379,6 +379,39 @@ if (
         if (!ok) return json({ status: "error", detail: data }, 400);
         return json(data?.[0] ?? data);
       }
+// ✅ PATCH /api/private/plan/:id { title?, person_name?, background_image_url? }
+if (request.method === "PATCH" && url.pathname.startsWith("/api/private/plan/") && !url.pathname.endsWith("/publish")) {
+  const token = getAuthToken(request);
+  if (!token) return json({ status: "unauthorized" }, 401);
+
+  const id = url.pathname.split("/").pop() || "";
+  if (!id) return json({ status: "missing_id" }, 400);
+
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body !== "object") return json({ status: "bad_json" }, 400);
+
+  const patch: any = {};
+  if (typeof body.title === "string") patch.title = body.title;
+  if (typeof body.person_name === "string" || body.person_name === null) patch.person_name = body.person_name;
+  if (typeof body.background_image_url === "string" || body.background_image_url === null)
+    patch.background_image_url = body.background_image_url;
+
+  if (Object.keys(patch).length === 0) return json({ status: "missing_patch_fields" }, 400);
+
+  const { ok, data } = await supabaseRest(
+    env,
+    `/rest/v1/plans?id=eq.${encodeURIComponent(id)}&select=id,title,person_name,status,start_question_id,background_image_url`,
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch),
+    },
+    token
+  );
+
+  if (!ok) return json({ status: "error", detail: data }, 400);
+  return json(data?.[0] ?? data);
+}
 
       // PATCH /api/private/plan/:id/publish { expires_in_hours? }
       if (
