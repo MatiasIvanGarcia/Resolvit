@@ -244,6 +244,7 @@ function CreateLinear({ session }: { session: Session }) {
     title: string;
     person_name: string | null;
     status: string;
+    background_image_url?: string | null;
     invite_title_template?: string | null;
     invite_body_template?: string | null;
   };
@@ -267,6 +268,7 @@ function CreateLinear({ session }: { session: Session }) {
 
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [bgUrl, setBgUrl] = React.useState("");
 
   const [plan, setPlan] = React.useState<PlanRow | null>(null);
   const [title, setTitle] = React.useState("");
@@ -343,6 +345,21 @@ const [savingTemplate, setSavingTemplate] = React.useState(false);
     }
   }
 
+  async function patchPlan(patch: Partial<PlanRow>) {
+  if (!plan?.id) return;
+  setError(null);
+  try {
+    const updated = await authedFetch(`/api/private/plan/${encodeURIComponent(plan.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    setPlan((prev) => (prev ? { ...prev, ...updated } : updated));
+  } catch (e: any) {
+    setError(String(e.message || e));
+  }
+}
+
+
   async function saveTemplates() {
     if (!plan?.id) return;
     setBusy(true);
@@ -375,6 +392,7 @@ const [savingTemplate, setSavingTemplate] = React.useState(false);
         body: JSON.stringify({ title: title.trim(), person_name: personName.trim() || null }),
       });
       setPlan(data);
+      setBgUrl(data.background_image_url ?? "");
       setQuestions([]);
       setOptionsByQuestion({});
       setShareUrl(null);
@@ -577,13 +595,47 @@ async function saveMessageTemplate() {
                 {busy ? "Creando…" : "Crear plan"}
               </button>
             </div>
-          ) : (
-            <div className="mt-2 text-sm text-white/70">
-              {plan.title}
-              {plan.person_name ? ` · para ${plan.person_name}` : ""} · estado:{" "}
-              <span className="text-white">{plan.status}</span>
-            </div>
-          )}
+) : (
+  <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+    <div className="md:col-span-1">
+      <div className="text-xs text-white/60 mb-1">Título</div>
+      <input
+        className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+        value={plan.title}
+        onChange={(e) => setPlan((p) => (p ? { ...p, title: e.target.value } : p))}
+        onBlur={() => patchPlan({ title: plan.title.trim() })}
+        placeholder="San Valentín"
+      />
+    </div>
+
+    <div className="md:col-span-1">
+      <div className="text-xs text-white/60 mb-1">Para</div>
+      <input
+        className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+        value={plan.person_name ?? ""}
+        onChange={(e) => setPlan((p) => (p ? { ...p, person_name: e.target.value } : p))}
+        onBlur={() => patchPlan({ person_name: (plan.person_name ?? "").trim() || null })}
+        placeholder="Sofía"
+      />
+    </div>
+
+    <div className="md:col-span-1">
+      <div className="text-xs text-white/60 mb-1">URL Imagen de fondo (opcional)</div>
+      <input
+        className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+        value={bgUrl}
+        onChange={(e) => setBgUrl(e.target.value)}
+        onBlur={() => patchPlan({ background_image_url: bgUrl.trim() || null })}
+        placeholder="https://..."
+      />
+    </div>
+
+    <div className="md:col-span-3 text-xs text-white/60">
+      estado: <span className="text-white/80">{plan.status}</span>
+    </div>
+  </div>
+)}
+
         </div>
 
         {/* LISTA LINEAL */}
