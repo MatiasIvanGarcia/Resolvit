@@ -711,59 +711,7 @@ async function saveMessageTemplate() {
               + Agregar decisión
             </button>
 
-            {/* INVITACIÓN FINAL */}
-            <div className="rounded-3xl border border-white/15 bg-white/5 p-5">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold">Invitación final</div>
-                <div className="text-xs text-white/60">{saveMsg ?? ""}</div>
-              </div>
 
-              <div className="mt-4 space-y-3">
-                <input
-                  ref={titleRef}
-                  className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                  value={inviteTitleTmpl}
-                  onChange={(e) => setInviteTitleTmpl(e.target.value)}
-                />
-
-                <textarea
-                  ref={bodyRef}
-                  className="w-full min-h-[140px] rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none whitespace-pre-wrap"
-                  value={inviteBodyTmpl}
-                  onChange={(e) => setInviteBodyTmpl(e.target.value)}
-                />
-
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-                  <div className="text-xs text-white/60 mb-2">Variables (click para insertar)</div>
-                  <div className="flex flex-wrap gap-2">
-                    {variablesList().map((v) => (
-                      <button
-                        key={v}
-                        type="button"
-                        className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs hover:bg-white/10"
-                        onClick={() => {
-                          // inserta en el body por defecto (más útil)
-                          insertAtCursor("body", v);
-                        }}
-                      >
-                        {v}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="mt-3 flex gap-2">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      className="rounded-2xl bg-white text-slate-950 px-4 py-2 text-sm font-semibold hover:opacity-90 disabled:opacity-50"
-                      onClick={saveTemplates}
-                    >
-                      Guardar mensaje
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
             {/* MENSAJE FINAL */}
 <div className="rounded-3xl border border-white/15 bg-white/5 p-5">
   <div className="text-sm font-semibold">Mensaje final</div>
