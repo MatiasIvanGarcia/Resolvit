@@ -361,8 +361,8 @@ function CreateLinear({ session }: { session: Session }) {
 
     const p = data.plan as PlanRow & {
       background_image_url?: string | null;
-      message_title_template?: string | null;
-      message_body_template?: string | null;
+      invite_title_template?: string | null;
+      invite_body_template?: string | null;
     };
 
     setPlan({ id: p.id, title: p.title, person_name: p.person_name ?? null, status: p.status });
@@ -370,9 +370,6 @@ function CreateLinear({ session }: { session: Session }) {
     setTitle(p.title ?? "");
     setPersonName(p.person_name ?? "");
     setBgUrl(p.background_image_url ?? "");
-
-    setMessageTitleTpl(p.message_title_template ?? "Te invito #persona a que pasemos #plan juntos");
-    setMessageBodyTpl(p.message_body_template ?? "Hola #persona!!\n\n¿Te copás a #decision1?\n\nTe espero!!");
 
 
     const qs: QuestionRow[] = (data.questions ?? []);
@@ -565,21 +562,6 @@ async function patchPlan(patch: any) {
       setBusy(false);
     }
   }
-async function saveMessageTemplate() {
-  if (!plan?.id) return;
-  setSavingTemplate(true);
-  setError(null);
-  try {
-    await patchPlan({
-      message_title_template: messageTitleTpl,
-      message_body_template: messageBodyTpl,
-    });
-  } catch (e: any) {
-    setError(String(e.message || e));
-  } finally {
-    setSavingTemplate(false);
-  }
-}
 
   async function addDecision() {
     if (!plan?.id) return;
@@ -693,16 +675,26 @@ async function saveMessageTemplate() {
   setError(null);
 
   try {
-    await authedFetch(
-      `/api/private/plan/${encodeURIComponent(plan.id)}/message_template`,
-      {
-        method: "PATCH",
-        body: JSON.stringify({
-          message_title_template: messageTitleTpl,
-          message_body_template: messageBodyTpl,
-        }),
-      }
-    );
+    const out = await authedFetch(`/api/private/plan/${encodeURIComponent(plan.id)}/templates`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        invite_title_template: inviteTitleTmpl,
+        invite_body_template: inviteBodyTmpl,
+      }),
+    });
+
+    if (out?.plan) {
+      setPlan((p) => (p ? { ...p, ...out.plan } : p));
+    } else {
+      setPlan((p) =>
+        p
+          ? { ...p, invite_title_template: inviteTitleTmpl, invite_body_template: inviteBodyTmpl }
+          : p
+      );
+    }
+
+    setSaveMsg("Guardado ✅");
+    window.setTimeout(() => setSaveMsg(null), 1200);
   } catch (e: any) {
     setError(String(e.message || e));
   } finally {
