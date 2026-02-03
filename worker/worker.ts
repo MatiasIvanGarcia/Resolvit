@@ -364,10 +364,35 @@ if (request.method === "GET" && url.pathname === "/api/private/plans") {
     if (!latestByPlan[inv.plan_id]) latestByPlan[inv.plan_id] = inv; // viene ordenado desc
   }
 
+  // 3) Traigo counts de submissions por plan (1 RPC)
+const ids = plans.map((p) => p.id);
+
+let countsByPlan: Record<string, number> = {};
+if (ids.length > 0) {
+  const rpcRes = await supabaseRest(
+    env,
+    `/rest/v1/rpc/get_submission_counts_for_plans`,
+    {
+      method: "POST",
+      body: JSON.stringify({ p_plan_ids: ids }),
+    },
+    token
+  );
+
+  if (rpcRes.ok && Array.isArray(rpcRes.data)) {
+    for (const row of rpcRes.data) {
+      countsByPlan[row.plan_id] = Number(row.total || 0);
+    }
+  }
+}
+
+
   const out = plans.map((p) => {
     const inv = latestByPlan[p.id] || null;
     return {
       ...p,
+      responses_count,
+      has_responses: responses_count > 0,
       invite: inv
         ? {
             code: inv.code,
