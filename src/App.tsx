@@ -459,7 +459,7 @@ async function patchPlan(patch: any) {
     // sincronizo también campos locales por si querés
     if (typeof updated?.title === "string") setTitle(updated.title);
     if ("person_name" in (updated || {})) setPersonName(updated.person_name ?? "");
-    if ("" in (updated || {})) setBgUrl(updated. ?? "");
+    if ("" in (updated || {})) setBgUrl(updated.background_image_url ?? "");
   } catch (e: any) {
     setError(String(e.message || e));
   }
