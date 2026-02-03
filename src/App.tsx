@@ -752,6 +752,12 @@ async function saveMessageTemplate() {
         >
           Cerrar sesión
         </button>
+        <button
+  className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
+  onClick={() => navigate("/plans")}
+>
+  Mis planes
+</button>
       </header>
 
       <main className="mx-auto max-w-6xl px-6 pb-16">
@@ -1119,7 +1125,7 @@ function MyPlans({ session }: { session: Session }) {
         <div className="flex items-end justify-between gap-4">
           <div>
             <div className="text-2xl font-semibold">Mis planes</div>
-            <div className="text-white/60 text-sm">Tus planes guardados en mosaico</div>
+            <div className="text-white/60 text-sm">Tus planes guardados.</div>
           </div>
         </div>
 
