@@ -1179,6 +1179,18 @@ function MyPlans({ session }: { session: Session }) {
                   {/* Overlay */}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-black/20" />
 
+                      {/* 👉 ACÁ VA EL CÍRCULO 👈 */}
+    <div className="absolute right-4 top-4">
+      <div
+        title={p.has_responses ? "Con respuestas" : "Sin respuestas"}
+        className={
+          "h-3 w-3 rounded-full ring-2 ring-white/20 " +
+          (p.has_responses ? "bg-emerald-400" : "bg-yellow-400")
+        }
+      />
+    </div>
+                  
+
                   {/* Contenido */}
                   <div className="relative h-full w-full p-5 flex flex-col justify-between">
                     <div className="flex items-start justify-between">
@@ -1197,31 +1209,38 @@ function MyPlans({ session }: { session: Session }) {
                     </div>
 
 {/* Hover actions */}
-<div className="opacity-0 group-hover:opacity-100 transition-opacity">
-  <div className="flex gap-2">
+<div className="opacity-0 group-hover:opacity-100 transition-opacity space-y-2">
+  <div className="flex gap-2 flex-wrap">
+    {/* Si tiene respuestas, primero Respuestas */}
+    {p.has_responses && (
+      <button
+        className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20"
+        onClick={() => navigate(`/responses?plan=${encodeURIComponent(p.id)}`)}
+      >
+        Respuestas
+      </button>
+    )}
+
     <button
-      className="flex-1 rounded-2xl bg-white text-slate-950 px-3 py-2 text-xs font-semibold hover:opacity-90"
+      className="rounded-2xl bg-white text-slate-950 px-3 py-2 text-xs font-semibold hover:opacity-90"
       onClick={() => navigate(`/create?plan=${encodeURIComponent(p.id)}`)}
     >
       Editar
     </button>
 
     <button
-      className={
-        "rounded-2xl px-3 py-2 text-xs font-semibold " +
-        (share
-          ? "bg-white text-slate-950 hover:opacity-90"
-          : "bg-white/10 border border-white/15 text-white/50 cursor-not-allowed")
-      }
       disabled={!share}
-      title={share ? "Copiar link de invitación" : "No publicado (todavía no hay link)"}
+      className={
+        "rounded-2xl bg-white/10 border border-white/15 px-3 py-2 text-xs font-semibold hover:bg-white/15 disabled:opacity-50"
+      }
       onClick={async () => {
         if (!share) return;
         await navigator.clipboard.writeText(share);
         alert("Link copiado ✅");
       }}
+      title={share ? "Link" : "No publicado (todavía no hay link)"}
     >
-      Copiar link
+      Link
     </button>
 
     <button
@@ -1243,8 +1262,9 @@ function MyPlans({ session }: { session: Session }) {
     </button>
   </div>
 
+  {/* Si querés mantener el mensaje de no publicado (sin mostrar URL) */}
   {!share && (
-    <div className="mt-2 text-[11px] text-white/70">
+    <div className="rounded-2xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white/80">
       No publicado (todavía no hay link)
     </div>
   )}
