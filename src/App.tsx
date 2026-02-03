@@ -369,7 +369,7 @@ function CreateLinear({ session }: { session: Session }) {
 
     setTitle(p.title ?? "");
     setPersonName(p.person_name ?? "");
-    setBackgroundUrl(p.background_image_url ?? "");
+    setBgUrl(p.background_image_url ?? "");
     setMessageTitleTpl(p.message_title_template ?? "Te invito #persona a que pasemos #plan juntos");
     setMessageBodyTpl(p.message_body_template ?? "Hola #persona!!\n\n¿Te copás a #decision1?\n\nTe espero!!");
 
@@ -457,7 +457,7 @@ async function patchPlan(patch: any) {
     // sincronizo también campos locales por si querés
     if (typeof updated?.title === "string") setTitle(updated.title);
     if ("person_name" in (updated || {})) setPersonName(updated.person_name ?? "");
-    if ("background_image_url" in (updated || {})) setBgUrl(updated.background_image_url ?? "");
+    if ("" in (updated || {})) setBgUrl(updated. ?? "");
   } catch (e: any) {
     setError(String(e.message || e));
   }
