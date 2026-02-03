@@ -316,8 +316,6 @@ const [messageBodyTpl, setMessageBodyTpl] = React.useState(
   "Hola #persona!!\n\n¿Te copás a #decision1?\n\nTe espero!!"
 );
 
-const [savingTemplate, setSavingTemplate] = React.useState(false);
-
   const [questions, setQuestions] = React.useState<QuestionRow[]>([]);
   const [optionsByQuestion, setOptionsByQuestion] = React.useState<Record<string, OptionRow[]>>({});
   const [shareUrl, setShareUrl] = React.useState<string | null>(null);
