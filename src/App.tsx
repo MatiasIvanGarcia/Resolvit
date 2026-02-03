@@ -1260,13 +1260,6 @@ function MyPlans({ session }: { session: Session }) {
       Eliminar
     </button>
   </div>
-
-  {/* Si querés mantener el mensaje de no publicado (sin mostrar URL) */}
-  {!share && (
-    <div className="rounded-2xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white/80">
-      No publicado (todavía no hay link)
-    </div>
-  )}
 </div>
 
 
