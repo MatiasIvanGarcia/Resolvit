@@ -327,7 +327,7 @@ if (
 }
 
       
-      // GET /api/private/plans  -> lista planes del usuario + ultimo invite (si hay)
+// GET /api/private/plans  -> lista planes del usuario + ultimo invite (si hay) + contador de respuestas
 if (request.method === "GET" && url.pathname === "/api/private/plans") {
   const token = getAuthToken(request);
   if (!token) return json({ status: "unauthorized" }, 401);
@@ -344,11 +344,13 @@ if (request.method === "GET" && url.pathname === "/api/private/plans") {
   const plans = (plansRes.data || []) as Array<any>;
   if (plans.length === 0) return json({ status: "ok", plans: [] });
 
+  // ids (una sola vez)
+  const planIds = plans.map((p) => p.id);
+
   // 2) Traigo invites para esos planes (1 query) y elijo el más reciente activo por plan
- 
   const invitesRes = await supabaseRest(
     env,
-    `/rest/v1/invites?select=plan_id,code,expires_at,is_active,created_at&plan_id=in.(${ids
+    `/rest/v1/invites?select=plan_id,code,expires_at,is_active,created_at&plan_id=in.(${planIds
       .map((x) => `"${x}"`)
       .join(",")})&order=created_at.desc`,
     { method: "GET" },
@@ -365,29 +367,35 @@ if (request.method === "GET" && url.pathname === "/api/private/plans") {
   }
 
   // 3) Traigo counts de submissions por plan (1 RPC)
- const ids = plans.map((p) => p.id);
-let countsByPlan: Record<string, number> = {};
-if (ids.length > 0) {
-  const rpcRes = await supabaseRest(
-    env,
-    `/rest/v1/rpc/get_submission_counts_for_plans`,
-    {
-      method: "POST",
-      body: JSON.stringify({ p_plan_ids: ids }),
-    },
-    token
-  );
+  const countsByPlan: Record<string, number> = {};
+  if (planIds.length > 0) {
+    const rpcRes = await supabaseRest(
+      env,
+      `/rest/v1/rpc/get_submission_counts_for_plans`,
+      {
+        method: "POST",
+        body: JSON.stringify({ p_plan_ids: planIds }),
+      },
+      token
+    );
 
-  if (rpcRes.ok && Array.isArray(rpcRes.data)) {
-    for (const row of rpcRes.data) {
-      countsByPlan[row.plan_id] = Number(row.total || 0);
+    if (!rpcRes.ok) {
+      // Si querés que NO rompa la vista por fallar el RPC, comentá este return
+      return json({ status: "error", step: "rpc_get_submission_counts_for_plans", detail: rpcRes.data }, 400);
+    }
+
+    if (Array.isArray(rpcRes.data)) {
+      for (const row of rpcRes.data) {
+        countsByPlan[row.plan_id] = Number(row.total || 0);
+      }
     }
   }
-}
 
-
+  // 4) Output final
   const out = plans.map((p) => {
     const inv = latestByPlan[p.id] || null;
+    const responses_count = countsByPlan[p.id] || 0;
+
     return {
       ...p,
       responses_count,
@@ -404,6 +412,7 @@ if (ids.length > 0) {
 
   return json({ status: "ok", plans: out });
 }
+
 
 // DELETE /api/private/plan/:id  -> borra plan + todo lo relacionado (options, questions, invites, submissions)
 if (request.method === "DELETE" && url.pathname.startsWith("/api/private/plan/")) {
