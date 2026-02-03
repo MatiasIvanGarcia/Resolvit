@@ -302,9 +302,6 @@ const [bgUrl, setBgUrl] = React.useState(""); // si no lo tenías
   const [personName, setPersonName] = React.useState("");
 
 const [backgroundUrl, setBackgroundUrl] = React.useState("");
-const [messageTitleTpl, setMessageTitleTpl] = React.useState("Te invito #persona a que pasemos #plan juntos");
-const [messageBodyTpl, setMessageBodyTpl] = React.useState("Hola #persona!!\n\n¿Te copás a #decision1?\n\nTe espero!!");
-  
 const editingPlanId = React.useMemo(() => getQueryParam("plan"), []);
 const isEditing = Boolean(editingPlanId);
 
