@@ -264,8 +264,23 @@ function CreateLinear({ session }: { session: Session }) {
     invite_title_template?: string | null;
     invite_body_template?: string | null;
   };
-  type QuestionRow = { id: string; plan_id: string; ord: number; title: string; subtitle: string | null };
-  type OptionRow = { id: string; question_id: string; ord: number; label: string; image_url: string | null; next_question_id: string | null };
+
+  type QuestionRow = {
+    id: string;
+    plan_id: string;
+    ord: number;
+    title: string;
+    subtitle: string | null;
+  };
+
+  type OptionRow = {
+    id: string;
+    question_id: string;
+    ord: number;
+    label: string;
+    image_url: string | null;
+    next_question_id: string | null;
+  };
 
   async function authedFetch(path: string, init?: RequestInit) {
     const token = session.access_token;
@@ -282,36 +297,42 @@ function CreateLinear({ session }: { session: Session }) {
     return data;
   }
 
-const [savingTemplate, setSavingTemplate] = React.useState(false);
-
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [bgUrl, setBgUrl] = React.useState("");
 
   const [plan, setPlan] = React.useState<PlanRow | null>(null);
+
+  // SOLO se usan cuando todavía NO hay plan (pantalla de "Crear plan")
   const [title, setTitle] = React.useState("");
   const [personName, setPersonName] = React.useState("");
 
-const [backgroundUrl, setBackgroundUrl] = React.useState("");
-const editingPlanId = React.useMemo(() => getQueryParam("plan"), []);
-const isEditing = Boolean(editingPlanId);
+  // Fondo editable del plan (URL)
+  const [bgUrl, setBgUrl] = React.useState("");
 
+  // Modo edición por query param (?plan=...)
+  const editingPlanId = React.useMemo(() => getQueryParam("plan"), []);
+  const isEditing = Boolean(editingPlanId);
 
   const [questions, setQuestions] = React.useState<QuestionRow[]>([]);
   const [optionsByQuestion, setOptionsByQuestion] = React.useState<Record<string, OptionRow[]>>({});
   const [shareUrl, setShareUrl] = React.useState<string | null>(null);
 
-  // Templates editor state
+  // Editor de template del mensaje final
   const DEFAULT_TITLE_TMPL = "Te invito #persona a que pasemos #plan juntos";
   const DEFAULT_BODY_TMPL = "Hola #persona!!\n\n¿Te copás a #decision1?\n\nTe espero!!";
+
   const [inviteTitleTmpl, setInviteTitleTmpl] = React.useState(DEFAULT_TITLE_TMPL);
   const [inviteBodyTmpl, setInviteBodyTmpl] = React.useState(DEFAULT_BODY_TMPL);
+  const [savingTemplate, setSavingTemplate] = React.useState(false);
   const [saveMsg, setSaveMsg] = React.useState<string | null>(null);
 
   const titleRef = React.useRef<HTMLInputElement | null>(null);
   const bodyRef = React.useRef<HTMLTextAreaElement | null>(null);
 
-  const sortedQuestions = React.useMemo(() => questions.slice().sort((a, b) => a.ord - b.ord), [questions]);
+  const sortedQuestions = React.useMemo(
+    () => questions.slice().sort((a, b) => a.ord - b.ord),
+    [questions]
+  );
 
   function getOpts(qid: string) {
     return (optionsByQuestion[qid] || []).slice().sort((a, b) => a.ord - b.ord);
@@ -319,14 +340,14 @@ const isEditing = Boolean(editingPlanId);
 
   function isComplete(q: QuestionRow) {
     const opts = getOpts(q.id);
-    return Boolean(q.subtitle?.trim()) && opts.length === 2 && opts.every((o) => o.label.trim().length > 0);
+    return Boolean(q.subtitle?.trim()) && opts.length === 2 && opts.every((o) => (o.label || "").trim().length > 0);
   }
 
-  const canPublish = plan?.id && sortedQuestions.length > 0 && sortedQuestions.every(isComplete);
+  const canPublish = Boolean(plan?.id) && sortedQuestions.length > 0 && sortedQuestions.every(isComplete);
 
   function variablesList() {
     const vars = ["#plan", "#persona"];
-    for (const q of sortedQuestions) vars.push(`#decision${q.ord}`);
+    sortedQuestions.forEach((_, i) => vars.push(`#decision${i + 1}`));
     return vars;
   }
 
