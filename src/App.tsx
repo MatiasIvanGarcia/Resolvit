@@ -436,6 +436,49 @@ function CreateLinear({ session }: { session: Session }) {
     setError(String(e.message || e));
   }
 }
+React.useEffect(() => {
+  if (!isEditing || !editingPlanId) return;
+
+  (async () => {
+    try {
+      setBusy(true);
+      setError(null);
+
+      const data = await authedFetch(`/api/private/plan/${encodeURIComponent(editingPlanId)}/builder`, {
+        method: "GET",
+      });
+
+      if (data.status !== "ok") throw new Error(JSON.stringify(data));
+
+      const p = data.plan as PlanRow;
+      const qs = (data.questions || []) as QuestionRow[];
+      const os = (data.options || []) as OptionRow[];
+
+      setPlan(p);
+      setBgUrl(p.background_image_url ?? "");
+
+      // templates
+      setInviteTitleTmpl(p.invite_title_template ?? DEFAULT_TITLE_TMPL);
+      setInviteBodyTmpl(p.invite_body_template ?? DEFAULT_BODY_TMPL);
+
+      // questions + optionsByQuestion
+      setQuestions(qs);
+
+      const map: Record<string, OptionRow[]> = {};
+      for (const o of os) {
+        (map[o.question_id] ||= []).push(o);
+      }
+      setOptionsByQuestion(map);
+
+      // shareUrl la podés dejar null en edición (o buscar invite activo después)
+      setShareUrl(null);
+    } catch (e: any) {
+      setError(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  })();
+}, [isEditing, editingPlanId]);
 
   React.useEffect(() => {
   if (editingPlanId) {
@@ -1398,7 +1441,7 @@ function Invite() {
 
                   <div className="rounded-3xl border border-white/15 bg-white/5 p-5 md:p-7 shadow-2xl">
                     <pre className="whitespace-pre-wrap text-base md:text-lg leading-relaxed text-white/90">
-                      {result?.invitation_text || "Generando…"}
+                      {(result?.invitation_text ? result.invitation_text.replace(/\\n/g, "\n") : "Generando…")}
                     </pre>
                   </div>
                 </motion.section>
