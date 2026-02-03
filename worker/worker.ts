@@ -175,6 +175,61 @@ export default {
         if (!ok) return json({ status: "error", detail: data }, 400);
         return json(data?.[0] ?? data);
       }
+
+      // GET /api/private/plans  -> lista planes del usuario + ultimo invite (si hay)
+if (request.method === "GET" && url.pathname === "/api/private/plans") {
+  const token = getAuthToken(request);
+  if (!token) return json({ status: "unauthorized" }, 401);
+
+  // 1) Traigo planes del user (RLS se encarga)
+  const plansRes = await supabaseRest(
+    env,
+    `/rest/v1/plans?select=id,title,person_name,status,background_image_url,created_at&order=created_at.desc`,
+    { method: "GET" },
+    token
+  );
+  if (!plansRes.ok) return json({ status: "error", detail: plansRes.data }, 400);
+
+  const plans = (plansRes.data || []) as Array<any>;
+  if (plans.length === 0) return json({ status: "ok", plans: [] });
+
+  // 2) Traigo invites para esos planes (1 query) y elijo el más reciente activo por plan
+  const ids = plans.map((p) => p.id);
+  const invitesRes = await supabaseRest(
+    env,
+    `/rest/v1/invites?select=plan_id,code,expires_at,is_active,created_at&plan_id=in.(${ids
+      .map((x) => `"${x}"`)
+      .join(",")})&order=created_at.desc`,
+    { method: "GET" },
+    token
+  );
+  if (!invitesRes.ok) return json({ status: "error", detail: invitesRes.data }, 400);
+
+  const invites = (invitesRes.data || []) as Array<any>;
+  const latestByPlan: Record<string, any> = {};
+
+  for (const inv of invites) {
+    if (!inv.is_active) continue;
+    if (!latestByPlan[inv.plan_id]) latestByPlan[inv.plan_id] = inv; // viene ordenado desc
+  }
+
+  const out = plans.map((p) => {
+    const inv = latestByPlan[p.id] || null;
+    return {
+      ...p,
+      invite: inv
+        ? {
+            code: inv.code,
+            expires_at: inv.expires_at,
+            share_url: `/i/${inv.code}`,
+          }
+        : null,
+    };
+  });
+
+  return json({ status: "ok", plans: out });
+}
+
 // PATCH /api/private/plan/:id/message_template
 if (
   request.method === "PATCH" &&
