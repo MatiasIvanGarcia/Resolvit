@@ -563,41 +563,76 @@ async function patchPlan(patch: any) {
     }
   }
 
-  async function addDecision() {
-    if (!plan?.id) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const nextOrd = (questions.reduce((m, q) => Math.max(m, q.ord), 0) || 0) + 1;
+async function addDecision() {
+  if (!plan?.id) return;
+  setBusy(true);
+  setError(null);
 
-      const q: QuestionRow = await authedFetch("/api/private/question", {
-        method: "POST",
-        body: JSON.stringify({
-          plan_id: plan.id,
-          ord: nextOrd,
-          title: "¿Qué preferís?",
-          subtitle: "",
-        }),
-      });
+  try {
+    const nextOrd = (questions.reduce((m, q) => Math.max(m, q.ord), 0) || 0) + 1;
 
-      // 👇 labels vacíos (no texto “Opción 1/2”), el placeholder lo muestra el input
-      const opts: OptionRow[] = await authedFetch("/api/private/options2", {
-        method: "POST",
-        body: JSON.stringify({
-          question_id: q.id,
-          a: { label: "", image_url: null },
-          b: { label: "", image_url: null },
-        }),
-      });
+    // 1) crear nueva pregunta
+    const newQ: QuestionRow = await authedFetch("/api/private/question", {
+      method: "POST",
+      body: JSON.stringify({
+        plan_id: plan.id,
+        ord: nextOrd,
+        title: "¿Qué preferís?",
+        subtitle: "",
+      }),
+    });
 
-      setQuestions((prev) => [...prev, q]);
-      setOptionsByQuestion((prev) => ({ ...prev, [q.id]: opts }));
-    } catch (e: any) {
-      setError(String(e.message || e));
-    } finally {
-      setBusy(false);
+    // 2) crear 2 opciones de esa pregunta
+    const newOpts: OptionRow[] = await authedFetch("/api/private/options2", {
+      method: "POST",
+      body: JSON.stringify({
+        question_id: newQ.id,
+        a: { label: "", image_url: null },
+        b: { label: "", image_url: null },
+      }),
+    });
+
+    // 3) 🧠 conectar la pregunta anterior -> esta nueva (para que el RPC recorra todo)
+    const prevQ = questions.slice().sort((a,b)=>a.ord-b.ord).find((q) => q.ord === nextOrd - 1);
+
+    if (prevQ) {
+      const prevOpts = (optionsByQuestion[prevQ.id] || []).slice().sort((a,b)=>a.ord-b.ord);
+      const o1 = prevOpts[0];
+      const o2 = prevOpts[1];
+
+      // Si existen las 2 opciones, seteo next_question_id en ambas
+      if (o1?.id && o2?.id) {
+        await Promise.all([
+          authedFetch(`/api/private/option/${encodeURIComponent(o1.id)}`, {
+            method: "PATCH",
+            body: JSON.stringify({ next_question_id: newQ.id }),
+          }),
+          authedFetch(`/api/private/option/${encodeURIComponent(o2.id)}`, {
+            method: "PATCH",
+            body: JSON.stringify({ next_question_id: newQ.id }),
+          }),
+        ]);
+
+        // reflejar en estado local
+        setOptionsByQuestion((prev) => ({
+          ...prev,
+          [prevQ.id]: prevOpts.map((o) =>
+            o.id === o1.id || o.id === o2.id ? { ...o, next_question_id: newQ.id } : o
+          ),
+        }));
+      }
     }
+
+    // 4) actualizar estado local con la nueva pregunta + opciones
+    setQuestions((prev) => [...prev, newQ]);
+    setOptionsByQuestion((prev) => ({ ...prev, [newQ.id]: newOpts }));
+
+  } catch (e: any) {
+    setError(String(e.message || e));
+  } finally {
+    setBusy(false);
   }
+}
 
   async function patchQuestion(qid: string, patch: Partial<QuestionRow>) {
     setError(null);
