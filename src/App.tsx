@@ -901,8 +901,8 @@ async function saveMessageTemplate() {
     <div className="text-xs text-white/60 mb-1">Título</div>
     <input
       className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-      value={messageTitleTpl}
-      onChange={(e) => setMessageTitleTpl(e.target.value)}
+      value={inviteTitleTmpl}
+onChange={(e) => setInviteTitleTmpl(e.target.value)}
     />
   </div>
 
@@ -911,8 +911,8 @@ async function saveMessageTemplate() {
     <textarea
       rows={8}
       className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none resize-none"
-      value={messageBodyTpl}
-      onChange={(e) => setMessageBodyTpl(e.target.value)}
+      value={inviteBodyTmpl}
+onChange={(e) => setInviteBodyTmpl(e.target.value)}
     />
   </div>
 
