@@ -282,16 +282,7 @@ function CreateLinear({ session }: { session: Session }) {
     return data;
   }
 
-const [messageTitleTpl, setMessageTitleTpl] = React.useState(
-  "Te invito #persona a que pasemos #plan juntos"
-);
-const [messageBodyTpl, setMessageBodyTpl] = React.useState(
-  "Hola #persona!!\n\n¿Te copás a #decision1?\n\nTe espero!!"
-);
 const [savingTemplate, setSavingTemplate] = React.useState(false);
-
-const [bgUrl, setBgUrl] = React.useState(""); // si no lo tenías
-
 
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -305,13 +296,6 @@ const [backgroundUrl, setBackgroundUrl] = React.useState("");
 const editingPlanId = React.useMemo(() => getQueryParam("plan"), []);
 const isEditing = Boolean(editingPlanId);
 
-  const [messageTitleTpl, setMessageTitleTpl] = React.useState(
-  "Te invito #persona a que pasemos #plan juntos"
-);
-
-const [messageBodyTpl, setMessageBodyTpl] = React.useState(
-  "Hola #persona!!\n\n¿Te copás a #decision1?\n\nTe espero!!"
-);
 
   const [questions, setQuestions] = React.useState<QuestionRow[]>([]);
   const [optionsByQuestion, setOptionsByQuestion] = React.useState<Record<string, OptionRow[]>>({});
