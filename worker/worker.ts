@@ -121,83 +121,6 @@ export default {
       // API privada (builder) - requiere login
       // =========================
 
-      // ✅ PATCH /api/private/plan/:id/templates { invite_title_template?, invite_body_template? }
-if (
-  request.method === "PATCH" &&
-  url.pathname.startsWith("/api/private/plan/") &&
-  url.pathname.endsWith("/templates")
-) {
-  const token = getAuthToken(request);
-  if (!token) return json({ status: "unauthorized" }, 401);
-
-  const parts = url.pathname.split("/");
-  const planId = parts[4]; // /api/private/plan/:id/templates
-  if (!planId) return json({ status: "missing_plan_id" }, 400);
-
-  const body = await request.json().catch(() => null);
-  if (!body || typeof body !== "object") return json({ status: "bad_json" }, 400);
-
-  const patch: any = {};
-  if ("invite_title_template" in body) patch.invite_title_template = body.invite_title_template ?? null;
-  if ("invite_body_template" in body) patch.invite_body_template = body.invite_body_template ?? null;
-
-  if (Object.keys(patch).length === 0) return json({ status: "missing_patch_fields" }, 400);
-
-  const { ok, data } = await supabaseRest(
-    env,
-    `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}&select=id,invite_title_template,invite_body_template`,
-    {
-      method: "PATCH",
-      headers: { Prefer: "return=representation" },
-      body: JSON.stringify(patch),
-    },
-    token
-  );
-
-  if (!ok) return json({ status: "error", detail: data }, 400);
-  return json(data?.[0] ?? data);
-}
-
-// PATCH /api/private/plan/:id/templates  (y alias /message_template)
-if (
-  request.method === "PATCH" &&
-  url.pathname.startsWith("/api/private/plan/") &&
-  (url.pathname.endsWith("/templates") || url.pathname.endsWith("/message_template"))
-) {
-  const token = getAuthToken(request);
-  if (!token) return json({ status: "unauthorized" }, 401);
-
-  const parts = url.pathname.split("/");
-  const planId = parts[4]; // /api/private/plan/:id/...
-  if (!planId) return json({ status: "missing_plan_id" }, 400);
-
-  const body = await request.json().catch(() => null);
-  if (!body || typeof body !== "object") return json({ status: "bad_json" }, 400);
-
-  // Aceptamos ambos nombres para compatibilidad
-  const title =
-    ("invite_title_template" in body ? body.invite_title_template : body.message_title_template) ?? null;
-
-  const bdy =
-    ("invite_body_template" in body ? body.invite_body_template : body.message_body_template) ?? null;
-
-  const patch: any = {};
-  if (("invite_title_template" in body) || ("message_title_template" in body)) patch.invite_title_template = title;
-  if (("invite_body_template" in body) || ("message_body_template" in body)) patch.invite_body_template = bdy;
-
-  if (Object.keys(patch).length === 0) return json({ status: "missing_patch_fields" }, 400);
-
-  const { ok, data } = await supabaseRest(
-    env,
-    `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}&select=id,invite_title_template,invite_body_template`,
-    { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) },
-    token
-  );
-  if (!ok) return json({ status: "error", detail: data }, 400);
-
-  return json({ status: "ok", plan: data?.[0] ?? data });
-}
-
       // POST /api/private/plan { title, person_name }
       if (request.method === "POST" && url.pathname === "/api/private/plan") {
         const token = getAuthToken(request);
@@ -315,7 +238,7 @@ if (request.method === "GET" && url.pathname.startsWith("/api/private/plan/") &&
   // 1) plan
   const pRes = await supabaseRest(
     env,
-    `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}&select=id,title,person_name,status,start_question_id,background_image_url,message_title_template,message_body_template`,
+    `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}&select=id,title,person_name,status,start_question_id,background_image_url,invite_title_template,invite_body_template`,
     { method: "GET" },
     token
   );
@@ -371,7 +294,7 @@ if (request.method === "GET" && url.pathname.startsWith("/api/private/plan/") &&
 }
 
 // PATCH /api/private/plan/:id  -> editar meta del plan (title/person/background/templates)
-if (request.method === "PATCH" && url.pathname.startsWith("/api/private/plan/") && !url.pathname.endsWith("/publish") && !url.pathname.endsWith("/full")) {
+if (request.method === "PATCH" && url.pathname.startsWith("/api/private/plan/") && !url.pathname.endsWith("/publish") && !url.pathname.endsWith("/templates")) && !url.pathname.endsWith("/builder")) {
   const token = getAuthToken(request);
   if (!token) return json({ status: "unauthorized" }, 401);
 
@@ -388,14 +311,11 @@ if (request.method === "PATCH" && url.pathname.startsWith("/api/private/plan/") 
   if ("person_name" in body) patch.person_name = body.person_name ?? null;
   if ("background_image_url" in body) patch.background_image_url = body.background_image_url ?? null;
 
-  if ("message_title_template" in body) patch.message_title_template = body.message_title_template ?? null;
-  if ("message_body_template" in body) patch.message_body_template = body.message_body_template ?? null;
-
   if (Object.keys(patch).length === 0) return json({ status: "missing_patch_fields" }, 400);
 
   const upd = await supabaseRest(
     env,
-    `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}&select=id,title,person_name,status,start_question_id,background_image_url,message_title_template,message_body_template`,
+    `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}&select=id,title,person_name,status,start_question_id,background_image_url,invite_title_template,invite_body_template`,
     { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) },
     token
   );
@@ -457,39 +377,6 @@ if (request.method === "GET" && url.pathname === "/api/private/plans") {
   });
 
   return json({ status: "ok", plans: out });
-}
-
-// PATCH /api/private/plan/:id/message_template
-if (
-  request.method === "PATCH" &&
-  url.pathname.startsWith("/api/private/plan/") &&
-  url.pathname.endsWith("/message_template")
-) {
-  const token = getAuthToken(request);
-  if (!token) return json({ status: "unauthorized" }, 401);
-
-  const parts = url.pathname.split("/");
-  const planId = parts[4];
-  if (!planId) return json({ status: "missing_plan_id" }, 400);
-
-  const body = await request.json().catch(() => null);
-  if (!body || typeof body !== "object") return json({ status: "bad_json" }, 400);
-
-  const patch: any = {};
-  if (typeof body.message_title_template === "string") patch.message_title_template = body.message_title_template;
-  if (typeof body.message_body_template === "string") patch.message_body_template = body.message_body_template;
-
-  if (Object.keys(patch).length === 0) return json({ status: "missing_patch_fields" }, 400);
-
-  const { ok, data } = await supabaseRest(
-    env,
-    `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}&select=id,message_title_template,message_body_template`,
-    { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) },
-    token
-  );
-
-  if (!ok) return json({ status: "error", detail: data }, 400);
-  return json(data?.[0] ?? data);
 }
 
 // DELETE /api/private/plan/:id  -> borra plan + todo lo relacionado (options, questions, invites, submissions)
@@ -565,18 +452,15 @@ if (request.method === "DELETE" && url.pathname.startsWith("/api/private/plan/")
 }
 
 
-      // ✅ PATCH /api/private/plan/:id/templates
-// body: { invite_title_template?: string|null, invite_body_template?: string|null }
+// PATCH /api/private/plan/:id/templates
 if (
   request.method === "PATCH" &&
-  url.pathname.startsWith("/api/private/plan/") &&
-  url.pathname.endsWith("/templates")
+  /^\/api\/private\/plan\/[^/]+\/templates$/.test(url.pathname)
 ) {
   const token = getAuthToken(request);
   if (!token) return json({ status: "unauthorized" }, 401);
 
-  const parts = url.pathname.split("/");
-  const planId = parts[4]; // /api/private/plan/:id/templates
+  const planId = url.pathname.split("/")[4];
   if (!planId) return json({ status: "missing_plan_id" }, 400);
 
   const body = await request.json().catch(() => null);
@@ -586,9 +470,7 @@ if (
   if ("invite_title_template" in body) patch.invite_title_template = body.invite_title_template ?? null;
   if ("invite_body_template" in body) patch.invite_body_template = body.invite_body_template ?? null;
 
-  if (Object.keys(patch).length === 0) {
-    return json({ status: "missing_patch_fields" }, 400);
-  }
+  if (Object.keys(patch).length === 0) return json({ status: "missing_patch_fields" }, 400);
 
   const { ok, data } = await supabaseRest(
     env,
@@ -735,39 +617,6 @@ if (
         if (!ok) return json({ status: "error", detail: data }, 400);
         return json(data?.[0] ?? data);
       }
-// ✅ PATCH /api/private/plan/:id { title?, person_name?, background_image_url? }
-if (request.method === "PATCH" && url.pathname.startsWith("/api/private/plan/") && !url.pathname.endsWith("/publish")) {
-  const token = getAuthToken(request);
-  if (!token) return json({ status: "unauthorized" }, 401);
-
-  const id = url.pathname.split("/").pop() || "";
-  if (!id) return json({ status: "missing_id" }, 400);
-
-  const body = await request.json().catch(() => null);
-  if (!body || typeof body !== "object") return json({ status: "bad_json" }, 400);
-
-  const patch: any = {};
-  if (typeof body.title === "string") patch.title = body.title;
-  if (typeof body.person_name === "string" || body.person_name === null) patch.person_name = body.person_name;
-  if (typeof body.background_image_url === "string" || body.background_image_url === null)
-    patch.background_image_url = body.background_image_url;
-
-  if (Object.keys(patch).length === 0) return json({ status: "missing_patch_fields" }, 400);
-
-  const { ok, data } = await supabaseRest(
-    env,
-    `/rest/v1/plans?id=eq.${encodeURIComponent(id)}&select=id,title,person_name,status,start_question_id,background_image_url`,
-    {
-      method: "PATCH",
-      headers: { Prefer: "return=representation" },
-      body: JSON.stringify(patch),
-    },
-    token
-  );
-
-  if (!ok) return json({ status: "error", detail: data }, 400);
-  return json(data?.[0] ?? data);
-}
 
       // PATCH /api/private/plan/:id/publish { expires_in_hours? }
       if (
