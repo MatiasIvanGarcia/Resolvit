@@ -365,7 +365,6 @@ if (request.method === "GET" && url.pathname === "/api/private/plans") {
   }
 
   // 3) Traigo counts de submissions por plan (1 RPC)
-const ids = plans.map((p) => p.id);
 
 let countsByPlan: Record<string, number> = {};
 if (ids.length > 0) {
