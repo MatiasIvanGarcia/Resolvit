@@ -1238,7 +1238,6 @@ function MyPlans({ session }: { session: Session }) {
         await navigator.clipboard.writeText(share);
         alert("Link copiado ✅");
       }}
-      title={share ? "Link" : "No publicado (todavía no hay link)"}
     >
       Link
     </button>
