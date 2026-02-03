@@ -245,6 +245,15 @@ function Login() {
   );
 }
 
+function getQueryParam(name: string) {
+  try {
+    const u = new URL(window.location.href);
+    return u.searchParams.get(name);
+  } catch {
+    return null;
+  }
+}
+
 function CreateLinear({ session }: { session: Session }) {
   type PlanRow = {
     id: string;
@@ -273,6 +282,17 @@ function CreateLinear({ session }: { session: Session }) {
     return data;
   }
 
+const [messageTitleTpl, setMessageTitleTpl] = React.useState(
+  "Te invito #persona a que pasemos #plan juntos"
+);
+const [messageBodyTpl, setMessageBodyTpl] = React.useState(
+  "Hola #persona!!\n\n¿Te copás a #decision1?\n\nTe espero!!"
+);
+const [savingTemplate, setSavingTemplate] = React.useState(false);
+
+const [bgUrl, setBgUrl] = React.useState(""); // si no lo tenías
+
+
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [bgUrl, setBgUrl] = React.useState("");
@@ -280,6 +300,13 @@ function CreateLinear({ session }: { session: Session }) {
   const [plan, setPlan] = React.useState<PlanRow | null>(null);
   const [title, setTitle] = React.useState("");
   const [personName, setPersonName] = React.useState("");
+
+const [backgroundUrl, setBackgroundUrl] = React.useState("");
+const [messageTitleTpl, setMessageTitleTpl] = React.useState("Te invito #persona a que pasemos #plan juntos");
+const [messageBodyTpl, setMessageBodyTpl] = React.useState("Hola #persona!!\n\n¿Te copás a #decision1?\n\nTe espero!!");
+  
+const editingPlanId = React.useMemo(() => getQueryParam("plan"), []);
+const isEditing = Boolean(editingPlanId);
 
   const [messageTitleTpl, setMessageTitleTpl] = React.useState(
   "Te invito #persona a que pasemos #plan juntos"
@@ -324,6 +351,48 @@ const [savingTemplate, setSavingTemplate] = React.useState(false);
     return vars;
   }
 
+  async function loadPlanForEdit(planId: string) {
+  setBusy(true);
+  setError(null);
+  try {
+    const data = await authedFetch(`/api/private/plan/${encodeURIComponent(planId)}/full`, { method: "GET" });
+
+    if (data?.status !== "ok") throw new Error(JSON.stringify(data));
+
+    const p = data.plan as PlanRow & {
+      background_image_url?: string | null;
+      message_title_template?: string | null;
+      message_body_template?: string | null;
+    };
+
+    setPlan({ id: p.id, title: p.title, person_name: p.person_name ?? null, status: p.status });
+
+    setTitle(p.title ?? "");
+    setPersonName(p.person_name ?? "");
+    setBackgroundUrl(p.background_image_url ?? "");
+    setMessageTitleTpl(p.message_title_template ?? "Te invito #persona a que pasemos #plan juntos");
+    setMessageBodyTpl(p.message_body_template ?? "Hola #persona!!\n\n¿Te copás a #decision1?\n\nTe espero!!");
+
+    const qs: QuestionRow[] = (data.questions ?? []);
+    const opts: OptionRow[] = (data.options ?? []);
+
+    setQuestions(qs);
+
+    const grouped: Record<string, OptionRow[]> = {};
+    for (const o of opts) {
+      (grouped[o.question_id] ||= []).push(o);
+    }
+    setOptionsByQuestion(grouped);
+
+    // si querés mostrar shareUrl en editor:
+    setShareUrl(data.share_url ?? null);
+  } catch (e: any) {
+    setError(String(e.message || e));
+  } finally {
+    setBusy(false);
+  }
+}
+
   function insertAtCursor(target: "title" | "body", token: string) {
     if (target === "title") {
       const el = titleRef.current;
@@ -365,6 +434,35 @@ const [savingTemplate, setSavingTemplate] = React.useState(false);
     setError(String(e.message || e));
   }
 }
+
+  React.useEffect(() => {
+  if (editingPlanId) {
+    loadPlanForEdit(editingPlanId);
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [editingPlanId]);
+
+async function patchPlan(patch: any) {
+  if (!plan?.id) return;
+  setError(null);
+  try {
+    const updated = await authedFetch(`/api/private/plan/${encodeURIComponent(plan.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+
+    // si tu backend devuelve representation del plan, esto sincroniza el estado
+    setPlan((prev) => (prev ? { ...prev, ...updated } : prev));
+
+    // sincronizo también campos locales por si querés
+    if (typeof updated?.title === "string") setTitle(updated.title);
+    if ("person_name" in (updated || {})) setPersonName(updated.person_name ?? "");
+    if ("background_image_url" in (updated || {})) setBgUrl(updated.background_image_url ?? "");
+  } catch (e: any) {
+    setError(String(e.message || e));
+  }
+}
+
 
 
   async function saveTemplates() {
@@ -422,6 +520,21 @@ const [savingTemplate, setSavingTemplate] = React.useState(false);
       setBusy(false);
     }
   }
+async function saveMessageTemplate() {
+  if (!plan?.id) return;
+  setSavingTemplate(true);
+  setError(null);
+  try {
+    await patchPlan({
+      message_title_template: messageTitleTpl,
+      message_body_template: messageBodyTpl,
+    });
+  } catch (e: any) {
+    setError(String(e.message || e));
+  } finally {
+    setSavingTemplate(false);
+  }
+}
 
   async function addDecision() {
     if (!plan?.id) return;
