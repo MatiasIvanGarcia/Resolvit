@@ -176,6 +176,108 @@ export default {
         return json(data?.[0] ?? data);
       }
 
+// GET /api/private/plan/:id/full  -> plan + questions + options + invite activo (si existe)
+if (request.method === "GET" && url.pathname.startsWith("/api/private/plan/") && url.pathname.endsWith("/full")) {
+  const token = getAuthToken(request);
+  if (!token) return json({ status: "unauthorized" }, 401);
+
+  const parts = url.pathname.split("/");
+  const planId = parts[4]; // /api/private/plan/:id/full
+  if (!planId) return json({ status: "missing_plan_id" }, 400);
+
+  // 1) plan
+  const pRes = await supabaseRest(
+    env,
+    `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}&select=id,title,person_name,status,start_question_id,background_image_url,message_title_template,message_body_template`,
+    { method: "GET" },
+    token
+  );
+  if (!pRes.ok) return json({ status: "error", step: "get_plan", detail: pRes.data }, 400);
+
+  const plan = (pRes.data?.[0] ?? null);
+  if (!plan) return json({ status: "not_found" }, 404);
+
+  // 2) questions
+  const qRes = await supabaseRest(
+    env,
+    `/rest/v1/questions?plan_id=eq.${encodeURIComponent(planId)}&select=id,plan_id,ord,title,subtitle&order=ord.asc`,
+    { method: "GET" },
+    token
+  );
+  if (!qRes.ok) return json({ status: "error", step: "get_questions", detail: qRes.data }, 400);
+
+  const questions = qRes.data ?? [];
+  const qids: string[] = questions.map((q: any) => q.id);
+
+  // 3) options (para todas las questions del plan)
+  let options: any[] = [];
+  if (qids.length > 0) {
+    const inList = qids.map((x) => `"${x}"`).join(",");
+    const oRes = await supabaseRest(
+      env,
+      `/rest/v1/options?question_id=in.(${inList})&select=id,question_id,ord,label,image_url,next_question_id&order=question_id.asc,ord.asc`,
+      { method: "GET" },
+      token
+    );
+    if (!oRes.ok) return json({ status: "error", step: "get_options", detail: oRes.data }, 400);
+    options = oRes.data ?? [];
+  }
+
+  // 4) invite activo (si querés mostrar link)
+  const iRes = await supabaseRest(
+    env,
+    `/rest/v1/invites?plan_id=eq.${encodeURIComponent(planId)}&is_active=eq.true&select=code,expires_at,is_active&order=created_at.desc&limit=1`,
+    { method: "GET" },
+    token
+  );
+  // ojo: si no tenés created_at, sacá order=created_at.desc
+  const invite = iRes.ok ? (iRes.data?.[0] ?? null) : null;
+
+  return json({
+    status: "ok",
+    plan,
+    questions,
+    options,
+    invite,
+    share_url: invite?.code ? `/i/${invite.code}` : null,
+  });
+}
+
+// PATCH /api/private/plan/:id  -> editar meta del plan (title/person/background/templates)
+if (request.method === "PATCH" && url.pathname.startsWith("/api/private/plan/") && !url.pathname.endsWith("/publish") && !url.pathname.endsWith("/full")) {
+  const token = getAuthToken(request);
+  if (!token) return json({ status: "unauthorized" }, 401);
+
+  const parts = url.pathname.split("/");
+  const planId = parts[4]; // /api/private/plan/:id
+  if (!planId) return json({ status: "missing_plan_id" }, 400);
+
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body !== "object") return json({ status: "bad_json" }, 400);
+
+  const patch: any = {};
+
+  if (typeof body.title === "string") patch.title = body.title;
+  if ("person_name" in body) patch.person_name = body.person_name ?? null;
+  if ("background_image_url" in body) patch.background_image_url = body.background_image_url ?? null;
+
+  if ("message_title_template" in body) patch.message_title_template = body.message_title_template ?? null;
+  if ("message_body_template" in body) patch.message_body_template = body.message_body_template ?? null;
+
+  if (Object.keys(patch).length === 0) return json({ status: "missing_patch_fields" }, 400);
+
+  const upd = await supabaseRest(
+    env,
+    `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}&select=id,title,person_name,status,start_question_id,background_image_url,message_title_template,message_body_template`,
+    { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) },
+    token
+  );
+  if (!upd.ok) return json({ status: "error", detail: upd.data }, 400);
+
+  return json(upd.data?.[0] ?? upd.data);
+}
+
+      
       // GET /api/private/plans  -> lista planes del usuario + ultimo invite (si hay)
 if (request.method === "GET" && url.pathname === "/api/private/plans") {
   const token = getAuthToken(request);
