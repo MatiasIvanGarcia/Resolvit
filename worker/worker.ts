@@ -345,7 +345,7 @@ if (request.method === "GET" && url.pathname === "/api/private/plans") {
   if (plans.length === 0) return json({ status: "ok", plans: [] });
 
   // 2) Traigo invites para esos planes (1 query) y elijo el más reciente activo por plan
-  const ids = plans.map((p) => p.id);
+ 
   const invitesRes = await supabaseRest(
     env,
     `/rest/v1/invites?select=plan_id,code,expires_at,is_active,created_at&plan_id=in.(${ids
@@ -365,7 +365,7 @@ if (request.method === "GET" && url.pathname === "/api/private/plans") {
   }
 
   // 3) Traigo counts de submissions por plan (1 RPC)
-
+ const ids = plans.map((p) => p.id);
 let countsByPlan: Record<string, number> = {};
 if (ids.length > 0) {
   const rpcRes = await supabaseRest(
