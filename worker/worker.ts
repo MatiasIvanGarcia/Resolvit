@@ -214,6 +214,56 @@ if (
         return json(data?.[0] ?? data);
       }
 
+      // GET /api/private/plan/:id/builder  -> plan + questions + options
+if (request.method === "GET" && url.pathname.startsWith("/api/private/plan/") && url.pathname.endsWith("/builder")) {
+  const token = getAuthToken(request);
+  if (!token) return json({ status: "unauthorized" }, 401);
+
+  const parts = url.pathname.split("/");
+  const planId = parts[4]; // /api/private/plan/:id/builder
+  if (!planId) return json({ status: "missing_plan_id" }, 400);
+
+  // 1) plan
+  const p = await supabaseRest(
+    env,
+    `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}&select=id,title,person_name,status,background_image_url,invite_title_template,invite_body_template`,
+    { method: "GET" },
+    token
+  );
+  if (!p.ok) return json({ status: "error", detail: p.data }, 400);
+  const plan = p.data?.[0];
+  if (!plan) return json({ status: "not_found" }, 404);
+
+  // 2) questions
+  const qs = await supabaseRest(
+    env,
+    `/rest/v1/questions?plan_id=eq.${encodeURIComponent(planId)}&select=id,plan_id,ord,title,subtitle&order=ord.asc`,
+    { method: "GET" },
+    token
+  );
+  if (!qs.ok) return json({ status: "error", detail: qs.data }, 400);
+
+  const questions = qs.data ?? [];
+  const qids = questions.map((q: any) => q.id);
+
+  // 3) options (si no hay preguntas, devolvemos [])
+  let options: any[] = [];
+  if (qids.length > 0) {
+    const inList = qids.map((x: string) => `"${x}"`).join(",");
+    const os = await supabaseRest(
+      env,
+      `/rest/v1/options?question_id=in.(${inList})&select=id,question_id,ord,label,image_url,next_question_id&order=question_id.asc,ord.asc`,
+      { method: "GET" },
+      token
+    );
+    if (!os.ok) return json({ status: "error", detail: os.data }, 400);
+    options = os.data ?? [];
+  }
+
+  return json({ status: "ok", plan, questions, options });
+}
+
+
 // GET /api/private/plan/:id/full  -> plan + questions + options + invite activo (si existe)
 if (request.method === "GET" && url.pathname.startsWith("/api/private/plan/") && url.pathname.endsWith("/full")) {
   const token = getAuthToken(request);
