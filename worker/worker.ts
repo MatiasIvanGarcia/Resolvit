@@ -294,19 +294,21 @@ if (request.method === "GET" && url.pathname.startsWith("/api/private/plan/") &&
 }
 
 // PATCH /api/private/plan/:id  -> editar meta del plan (title/person/background/templates)
-if (request.method === "PATCH" && url.pathname.startsWith("/api/private/plan/") && !url.pathname.endsWith("/publish") && !url.pathname.endsWith("/templates")) && !url.pathname.endsWith("/builder")) {
+// PATCH /api/private/plan/:id  -> editar meta del plan (title/person/background)
+if (
+  request.method === "PATCH" &&
+  /^\/api\/private\/plan\/[^/]+$/.test(url.pathname) // exact match
+) {
   const token = getAuthToken(request);
   if (!token) return json({ status: "unauthorized" }, 401);
 
-  const parts = url.pathname.split("/");
-  const planId = parts[4]; // /api/private/plan/:id
+  const planId = url.pathname.split("/")[4];
   if (!planId) return json({ status: "missing_plan_id" }, 400);
 
   const body = await request.json().catch(() => null);
   if (!body || typeof body !== "object") return json({ status: "bad_json" }, 400);
 
   const patch: any = {};
-
   if (typeof body.title === "string") patch.title = body.title;
   if ("person_name" in body) patch.person_name = body.person_name ?? null;
   if ("background_image_url" in body) patch.background_image_url = body.background_image_url ?? null;
