@@ -263,6 +263,78 @@ if (
   return json(data?.[0] ?? data);
 }
 
+// DELETE /api/private/plan/:id  -> borra plan + todo lo relacionado (options, questions, invites, submissions)
+if (request.method === "DELETE" && url.pathname.startsWith("/api/private/plan/")) {
+  const token = getAuthToken(request);
+  if (!token) return json({ status: "unauthorized" }, 401);
+
+  const parts = url.pathname.split("/");
+  const planId = parts[4]; // /api/private/plan/:id
+  if (!planId) return json({ status: "missing_plan_id" }, 400);
+
+  // 0) traer questions del plan (para borrar options)
+  const qRes = await supabaseRest(
+    env,
+    `/rest/v1/questions?plan_id=eq.${encodeURIComponent(planId)}&select=id`,
+    { method: "GET" },
+    token
+  );
+  if (!qRes.ok) return json({ status: "error", step: "get_questions", detail: qRes.data }, 400);
+
+  const qids = (qRes.data || []).map((x: any) => x.id) as string[];
+
+  // 1) borrar options de esas questions
+  if (qids.length > 0) {
+    const inList = qids.map((x) => `"${x}"`).join(",");
+    const delOpts = await supabaseRest(
+      env,
+      `/rest/v1/options?question_id=in.(${inList})`,
+      { method: "DELETE" },
+      token
+    );
+    if (!delOpts.ok) return json({ status: "error", step: "delete_options", detail: delOpts.data }, 400);
+  }
+
+  // 2) borrar questions del plan
+  const delQs = await supabaseRest(
+    env,
+    `/rest/v1/questions?plan_id=eq.${encodeURIComponent(planId)}`,
+    { method: "DELETE" },
+    token
+  );
+  if (!delQs.ok) return json({ status: "error", step: "delete_questions", detail: delQs.data }, 400);
+
+  // 3) borrar invites del plan
+  const delInv = await supabaseRest(
+    env,
+    `/rest/v1/invites?plan_id=eq.${encodeURIComponent(planId)}`,
+    { method: "DELETE" },
+    token
+  );
+  if (!delInv.ok) return json({ status: "error", step: "delete_invites", detail: delInv.data }, 400);
+
+  // 4) borrar submissions del plan (si las guardás)
+  const delSub = await supabaseRest(
+    env,
+    `/rest/v1/submissions?plan_id=eq.${encodeURIComponent(planId)}`,
+    { method: "DELETE" },
+    token
+  );
+  // si no existe tabla submissions o no la usás, podés borrar este bloque
+  if (!delSub.ok) return json({ status: "error", step: "delete_submissions", detail: delSub.data }, 400);
+
+  // 5) borrar plan
+  const delPlan = await supabaseRest(
+    env,
+    `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}`,
+    { method: "DELETE" },
+    token
+  );
+  if (!delPlan.ok) return json({ status: "error", step: "delete_plan", detail: delPlan.data }, 400);
+
+  return json({ status: "ok" });
+}
+
 
       // ✅ PATCH /api/private/plan/:id/templates
 // body: { invite_title_template?: string|null, invite_body_template?: string|null }
