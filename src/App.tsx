@@ -369,9 +369,11 @@ function CreateLinear({ session }: { session: Session }) {
 
     setTitle(p.title ?? "");
     setPersonName(p.person_name ?? "");
-    setBgUrl(p.background_image_url ?? "");
+    setBackgroundUrl(p.background_image_url ?? "");
+
     setMessageTitleTpl(p.message_title_template ?? "Te invito #persona a que pasemos #plan juntos");
     setMessageBodyTpl(p.message_body_template ?? "Hola #persona!!\n\n¿Te copás a #decision1?\n\nTe espero!!");
+
 
     const qs: QuestionRow[] = (data.questions ?? []);
     const opts: OptionRow[] = (data.options ?? []);
