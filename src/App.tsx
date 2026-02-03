@@ -1146,13 +1146,31 @@ function MyPlans({ session }: { session: Session }) {
                     </div>
 
 {/* Hover actions */}
-<div className="opacity-0 group-hover:opacity-100 transition-opacity space-y-2">
+<div className="opacity-0 group-hover:opacity-100 transition-opacity">
   <div className="flex gap-2">
     <button
       className="flex-1 rounded-2xl bg-white text-slate-950 px-3 py-2 text-xs font-semibold hover:opacity-90"
       onClick={() => navigate(`/create?plan=${encodeURIComponent(p.id)}`)}
     >
       Editar
+    </button>
+
+    <button
+      className={
+        "rounded-2xl px-3 py-2 text-xs font-semibold " +
+        (share
+          ? "bg-white text-slate-950 hover:opacity-90"
+          : "bg-white/10 border border-white/15 text-white/50 cursor-not-allowed")
+      }
+      disabled={!share}
+      title={share ? "Copiar link de invitación" : "No publicado (todavía no hay link)"}
+      onClick={async () => {
+        if (!share) return;
+        await navigator.clipboard.writeText(share);
+        alert("Link copiado ✅");
+      }}
+    >
+      Copiar link
     </button>
 
     <button
@@ -1174,25 +1192,13 @@ function MyPlans({ session }: { session: Session }) {
     </button>
   </div>
 
-  {share ? (
-    <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/15 bg-black/40 px-3 py-2">
-      <div className="text-xs text-white/80 truncate">{share}</div>
-      <button
-        className="rounded-xl bg-white text-slate-950 px-3 py-2 text-xs font-semibold hover:opacity-90"
-        onClick={async () => {
-          await navigator.clipboard.writeText(share);
-          alert("Copiado ✅");
-        }}
-      >
-        Copiar
-      </button>
-    </div>
-  ) : (
-    <div className="rounded-2xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white/80">
+  {!share && (
+    <div className="mt-2 text-[11px] text-white/70">
       No publicado (todavía no hay link)
     </div>
   )}
 </div>
+
 
                   </div>
 
