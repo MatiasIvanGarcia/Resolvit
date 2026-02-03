@@ -1,5 +1,5 @@
 Infra
-
+s
 Cloudflare Worker + Assets (SPA)
 
 API pública /api/public/*
