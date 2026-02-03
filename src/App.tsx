@@ -311,179 +311,6 @@ const [savingTemplate, setSavingTemplate] = React.useState(false);
     return (optionsByQuestion[qid] || []).slice().sort((a, b) => a.ord - b.ord);
   }
 
-  function MyPlans({ session }: { session: Session }) {
-  type PlanItem = {
-    id: string;
-    title: string;
-    person_name: string | null;
-    status: string;
-    background_image_url: string | null;
-    invite: null | { code: string; expires_at: string | null; share_url: string };
-  };
-
-  async function authedFetch(path: string, init?: RequestInit) {
-    const token = session.access_token;
-    const res = await fetch(path, {
-      ...(init || {}),
-      headers: {
-        ...(init?.headers || {}),
-        Authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-      },
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(data ? JSON.stringify(data) : "Request failed");
-    return data;
-  }
-
-  const [plans, setPlans] = React.useState<PlanItem[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await authedFetch("/api/private/plans", { method: "GET" });
-        if (!cancelled) setPlans(data?.plans || []);
-      } catch (e: any) {
-        if (!cancelled) setError(String(e.message || e));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      <header className="mx-auto max-w-6xl px-6 py-6 flex items-center justify-between">
-        <button className="text-lg font-semibold" onClick={() => navigate("/")}>
-          Plan Invitación
-        </button>
-
-        <div className="flex items-center gap-2">
-          <button
-            className="rounded-2xl bg-white text-slate-950 px-4 py-2 text-sm font-semibold hover:opacity-90"
-            onClick={() => navigate("/create")}
-          >
-            Crear plan
-          </button>
-          <button
-            className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
-            onClick={async () => {
-              await supabase.auth.signOut();
-              navigate("/");
-            }}
-          >
-            Cerrar sesión
-          </button>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-6xl px-6 pb-16">
-        <div className="flex items-end justify-between gap-4">
-          <div>
-            <div className="text-2xl font-semibold">Mis planes</div>
-            <div className="text-white/60 text-sm">Tus planes guardados en mosaico</div>
-          </div>
-        </div>
-
-        {error && (
-          <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200 whitespace-pre-wrap">
-            {error}
-          </div>
-        )}
-
-        {loading ? (
-          <div className="mt-10 text-white/70">Cargando…</div>
-        ) : plans.length === 0 ? (
-          <div className="mt-10 rounded-3xl border border-white/15 bg-white/5 p-6 text-white/70">
-            Todavía no tenés planes. Creá uno desde “Crear plan”.
-          </div>
-        ) : (
-          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {plans.map((p) => {
-              const share =
-                p.invite?.share_url ? `${window.location.origin}${p.invite.share_url}` : null;
-
-              return (
-                <div
-                  key={p.id}
-                  className="group relative h-[200px] rounded-3xl overflow-hidden border border-white/15 bg-white/5 shadow-2xl"
-                >
-                  {/* Fondo */}
-                  {p.background_image_url ? (
-                    <div
-                      className="absolute inset-0"
-                      style={{
-                        backgroundImage: `url(${p.background_image_url})`,
-                        backgroundSize: "cover",
-                        backgroundPosition: "center",
-                      }}
-                    />
-                  ) : (
-                    <div className="absolute inset-0 bg-white/10" />
-                  )}
-
-                  {/* Overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-black/20" />
-
-                  {/* Contenido */}
-                  <div className="relative h-full w-full p-5 flex flex-col justify-between">
-                    <div className="flex items-start justify-between">
-                      <div className="text-xs px-2 py-1 rounded-full border border-white/15 bg-black/30 text-white/70">
-                        {p.status}
-                      </div>
-                    </div>
-
-                    <div className="text-center">
-                      <div className="text-2xl font-semibold leading-tight">
-                        {p.title || "Sin título"}
-                      </div>
-                      <div className="text-white/70 text-sm mt-1">
-                        {p.person_name ? `para ${p.person_name}` : "sin destinatario"}
-                      </div>
-                    </div>
-
-                    {/* Hover actions */}
-                    <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                      {share ? (
-                        <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/15 bg-black/40 px-3 py-2">
-                          <div className="text-xs text-white/80 truncate">{share}</div>
-                          <button
-                            className="rounded-xl bg-white text-slate-950 px-3 py-2 text-xs font-semibold hover:opacity-90"
-                            onClick={async () => {
-                              await navigator.clipboard.writeText(share);
-                              alert("Copiado ✅");
-                            }}
-                          >
-                            Copiar
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="rounded-2xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white/80">
-                          No publicado (todavía no hay link)
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* (por ahora) no editamos, después lo hacemos clickeable */}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </main>
-    </div>
-  );
-}
-
   function isComplete(q: QuestionRow) {
     const opts = getOpts(q.id);
     return Boolean(q.subtitle?.trim()) && opts.length === 2 && opts.every((o) => o.label.trim().length > 0);
@@ -1028,6 +855,180 @@ async function saveMessageTemplate() {
     </div>
   );
 }
+
+function MyPlans({ session }: { session: Session }) {
+  type PlanItem = {
+    id: string;
+    title: string;
+    person_name: string | null;
+    status: string;
+    background_image_url: string | null;
+    invite: null | { code: string; expires_at: string | null; share_url: string };
+  };
+
+  async function authedFetch(path: string, init?: RequestInit) {
+    const token = session.access_token;
+    const res = await fetch(path, {
+      ...(init || {}),
+      headers: {
+        ...(init?.headers || {}),
+        Authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data ? JSON.stringify(data) : "Request failed");
+    return data;
+  }
+
+  const [plans, setPlans] = React.useState<PlanItem[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await authedFetch("/api/private/plans", { method: "GET" });
+        if (!cancelled) setPlans(data?.plans || []);
+      } catch (e: any) {
+        if (!cancelled) setError(String(e.message || e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-white">
+      <header className="mx-auto max-w-6xl px-6 py-6 flex items-center justify-between">
+        <button className="text-lg font-semibold" onClick={() => navigate("/")}>
+          Plan Invitación
+        </button>
+
+        <div className="flex items-center gap-2">
+          <button
+            className="rounded-2xl bg-white text-slate-950 px-4 py-2 text-sm font-semibold hover:opacity-90"
+            onClick={() => navigate("/create")}
+          >
+            Crear plan
+          </button>
+          <button
+            className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
+            onClick={async () => {
+              await supabase.auth.signOut();
+              navigate("/");
+            }}
+          >
+            Cerrar sesión
+          </button>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-6xl px-6 pb-16">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <div className="text-2xl font-semibold">Mis planes</div>
+            <div className="text-white/60 text-sm">Tus planes guardados en mosaico</div>
+          </div>
+        </div>
+
+        {error && (
+          <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200 whitespace-pre-wrap">
+            {error}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="mt-10 text-white/70">Cargando…</div>
+        ) : plans.length === 0 ? (
+          <div className="mt-10 rounded-3xl border border-white/15 bg-white/5 p-6 text-white/70">
+            Todavía no tenés planes. Creá uno desde “Crear plan”.
+          </div>
+        ) : (
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {plans.map((p) => {
+              const share =
+                p.invite?.share_url ? `${window.location.origin}${p.invite.share_url}` : null;
+
+              return (
+                <div
+                  key={p.id}
+                  className="group relative h-[200px] rounded-3xl overflow-hidden border border-white/15 bg-white/5 shadow-2xl"
+                >
+                  {/* Fondo */}
+                  {p.background_image_url ? (
+                    <div
+                      className="absolute inset-0"
+                      style={{
+                        backgroundImage: `url(${p.background_image_url})`,
+                        backgroundSize: "cover",
+                        backgroundPosition: "center",
+                      }}
+                    />
+                  ) : (
+                    <div className="absolute inset-0 bg-white/10" />
+                  )}
+
+                  {/* Overlay */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-black/20" />
+
+                  {/* Contenido */}
+                  <div className="relative h-full w-full p-5 flex flex-col justify-between">
+                    <div className="flex items-start justify-between">
+                      <div className="text-xs px-2 py-1 rounded-full border border-white/15 bg-black/30 text-white/70">
+                        {p.status}
+                      </div>
+                    </div>
+
+                    <div className="text-center">
+                      <div className="text-2xl font-semibold leading-tight">
+                        {p.title || "Sin título"}
+                      </div>
+                      <div className="text-white/70 text-sm mt-1">
+                        {p.person_name ? `para ${p.person_name}` : "sin destinatario"}
+                      </div>
+                    </div>
+
+                    {/* Hover actions */}
+                    <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                      {share ? (
+                        <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/15 bg-black/40 px-3 py-2">
+                          <div className="text-xs text-white/80 truncate">{share}</div>
+                          <button
+                            className="rounded-xl bg-white text-slate-950 px-3 py-2 text-xs font-semibold hover:opacity-90"
+                            onClick={async () => {
+                              await navigator.clipboard.writeText(share);
+                              alert("Copiado ✅");
+                            }}
+                          >
+                            Copiar
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white/80">
+                          No publicado (todavía no hay link)
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* (por ahora) no editamos, después lo hacemos clickeable */}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
 function Expired() {
   return (
     <div className="min-h-screen bg-slate-950 text-white p-8">
