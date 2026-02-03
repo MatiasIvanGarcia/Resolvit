@@ -740,12 +740,17 @@ if (
           return json({ status: "missing_answers" }, 400);
         }
 
+          // ✅ ACÁ VA LO QUE NO ENTENDÍAS (validación nombre)
+  const voterName = typeof payload?.voter_name === "string" ? payload.voter_name.trim() : null;
+  if (!voterName) return json({ status: "missing_voter_name" }, 400);
+
         const userAgent = request.headers.get("user-agent") || null;
 
         const { ok, data } = await supabaseRpc(env, "submit_public_submission", {
           p_code: code,
           p_answers: answers,
           p_user_agent: userAgent,
+          p_voter_name: voterName,
         });
 
         if (!ok) return json({ status: "rpc_error", detail: data }, 502);
