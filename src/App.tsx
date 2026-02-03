@@ -743,21 +743,22 @@ async function saveMessageTemplate() {
         <button className="text-lg font-semibold" onClick={() => navigate("/")}>
           Plan Invitación
         </button>
-        <button
-          className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
-          onClick={async () => {
-            await supabase.auth.signOut();
-            navigate("/");
-          }}
-        >
-          Cerrar sesión
-        </button>
-        <button
+                      <button
   className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
   onClick={() => navigate("/plans")}
 >
   Mis planes
 </button>
+
+              <button
+                className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
+                onClick={async () => {
+                  await supabase.auth.signOut();
+                  navigate("/");
+                }}
+              >
+                Cerrar sesión
+              </button>
       </header>
 
       <main className="mx-auto max-w-6xl px-6 pb-16">
