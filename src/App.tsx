@@ -739,27 +739,35 @@ async function saveMessageTemplate() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <header className="mx-auto max-w-6xl px-6 py-6 flex items-center justify-between">
-        <button className="text-lg font-semibold" onClick={() => navigate("/")}>
-          Plan Invitación
-        </button>
-                      <button
-  className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
-  onClick={() => navigate("/plans")}
->
-  Mis planes
-</button>
+<header className="mx-auto max-w-6xl px-6 py-6 flex items-center justify-between">
+  {/* IZQUIERDA */}
+  <div className="flex items-center gap-3">
+    <button
+      className="text-lg font-semibold"
+      onClick={() => navigate("/")}
+    >
+      Plan Invitación
+    </button>
 
-              <button
-                className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
-                onClick={async () => {
-                  await supabase.auth.signOut();
-                  navigate("/");
-                }}
-              >
-                Cerrar sesión
-              </button>
-      </header>
+    <button
+      className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
+      onClick={() => navigate("/plans")}
+    >
+      Mis planes
+    </button>
+  </div>
+
+  {/* DERECHA */}
+  <button
+    className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
+    onClick={async () => {
+      await supabase.auth.signOut();
+      navigate("/");
+    }}
+  >
+    Cerrar sesión
+  </button>
+</header>
 
       <main className="mx-auto max-w-6xl px-6 pb-16">
         {error && (
