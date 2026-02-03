@@ -995,27 +995,55 @@ function MyPlans({ session }: { session: Session }) {
                       </div>
                     </div>
 
-                    {/* Hover actions */}
-                    <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                      {share ? (
-                        <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/15 bg-black/40 px-3 py-2">
-                          <div className="text-xs text-white/80 truncate">{share}</div>
-                          <button
-                            className="rounded-xl bg-white text-slate-950 px-3 py-2 text-xs font-semibold hover:opacity-90"
-                            onClick={async () => {
-                              await navigator.clipboard.writeText(share);
-                              alert("Copiado ✅");
-                            }}
-                          >
-                            Copiar
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="rounded-2xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white/80">
-                          No publicado (todavía no hay link)
-                        </div>
-                      )}
-                    </div>
+{/* Hover actions */}
+<div className="opacity-0 group-hover:opacity-100 transition-opacity space-y-2">
+  <div className="flex gap-2">
+    <button
+      className="flex-1 rounded-2xl bg-white text-slate-950 px-3 py-2 text-xs font-semibold hover:opacity-90"
+      onClick={() => navigate(`/create?plan=${encodeURIComponent(p.id)}`)}
+    >
+      Editar
+    </button>
+
+    <button
+      className="rounded-2xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/20"
+      onClick={async () => {
+        if (!confirm("¿Eliminar este plan y todo lo relacionado?")) return;
+
+        try {
+          await authedFetch(`/api/private/plan/${encodeURIComponent(p.id)}`, {
+            method: "DELETE",
+          });
+          setPlans((prev) => prev.filter((x) => x.id !== p.id));
+        } catch (e: any) {
+          alert("Error eliminando: " + String(e.message || e));
+        }
+      }}
+    >
+      Eliminar
+    </button>
+  </div>
+
+  {share ? (
+    <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/15 bg-black/40 px-3 py-2">
+      <div className="text-xs text-white/80 truncate">{share}</div>
+      <button
+        className="rounded-xl bg-white text-slate-950 px-3 py-2 text-xs font-semibold hover:opacity-90"
+        onClick={async () => {
+          await navigator.clipboard.writeText(share);
+          alert("Copiado ✅");
+        }}
+      >
+        Copiar
+      </button>
+    </div>
+  ) : (
+    <div className="rounded-2xl border border-white/15 bg-black/40 px-3 py-2 text-xs text-white/80">
+      No publicado (todavía no hay link)
+    </div>
+  )}
+</div>
+
                   </div>
 
                   {/* (por ahora) no editamos, después lo hacemos clickeable */}
