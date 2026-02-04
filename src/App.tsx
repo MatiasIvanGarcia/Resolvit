@@ -1059,7 +1059,7 @@ onChange={(e) => setInviteBodyTmpl(e.target.value)}
     showToast("Link copiado correctamente");
                     }}
                   >
-                    Link
+                    Copiar
                   </button>
                 </div>
               )}
