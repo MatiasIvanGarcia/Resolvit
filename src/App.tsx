@@ -74,12 +74,6 @@ function Home({ session }: { session: Session | null }) {
           {session ? (
             <>
               <button
-                className="rounded-2xl bg-white text-slate-950 px-4 py-2 text-sm hover:opacity-90"
-                onClick={() => navigate("/create")}
-              >
-                Crear plan
-              </button>
-              <button
   className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
   onClick={() => navigate("/plans")}
 >
