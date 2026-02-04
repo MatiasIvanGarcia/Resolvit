@@ -317,6 +317,29 @@ function CreateLinear({ session }: { session: Session }) {
   const [optionsByQuestion, setOptionsByQuestion] = React.useState<Record<string, OptionRow[]>>({});
   const [shareUrl, setShareUrl] = React.useState<string | null>(null);
 
+  // ✅ Toast (mismo que /plans)
+const [toast, setToast] = React.useState<{ open: boolean; text: string }>({
+  open: false,
+  text: "",
+});
+const toastTimer = React.useRef<number | null>(null);
+
+function showToast(text: string) {
+  setToast({ open: true, text });
+
+  if (toastTimer.current) window.clearTimeout(toastTimer.current);
+  toastTimer.current = window.setTimeout(() => {
+    setToast((t) => ({ ...t, open: false }));
+  }, 2200);
+}
+
+React.useEffect(() => {
+  return () => {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+  };
+}, []);
+
+
   // Editor de template del mensaje final
   const DEFAULT_TITLE_TMPL = "Te invito #persona a que pasemos #plan juntos";
   const DEFAULT_BODY_TMPL = "Hola #persona!!\n\n¿Te copás a #decision1?\n\nTe espero!!";
@@ -1032,11 +1055,11 @@ onChange={(e) => setInviteBodyTmpl(e.target.value)}
                   <button
                     className="mt-3 rounded-2xl bg-white text-slate-950 px-4 py-2 text-sm font-semibold"
                     onClick={async () => {
-                      await navigator.clipboard.writeText(`${window.location.origin}${shareUrl}`);
-                      alert("Copiado ✅");
+                          await navigator.clipboard.writeText(`${window.location.origin}${shareUrl}`);
+    showToast("Link copiado correctamente");
                     }}
                   >
-                    Copiar
+                    Link
                   </button>
                 </div>
               )}
@@ -1044,6 +1067,18 @@ onChange={(e) => setInviteBodyTmpl(e.target.value)}
           </div>
         )}
       </main>
+      {/* ✅ TOAST */}
+<div
+  className={
+    "fixed left-1/2 -translate-x-1/2 bottom-5 z-[9999] " +
+    "transition-all duration-300 " +
+    (toast.open ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6 pointer-events-none")
+  }
+>
+  <div className="rounded-2xl border border-emerald-400/30 bg-emerald-500/15 px-5 py-3 shadow-2xl backdrop-blur">
+    <div className="text-sm font-semibold text-emerald-100 text-center">{toast.text}</div>
+  </div>
+</div>
     </div>
   );
 }
