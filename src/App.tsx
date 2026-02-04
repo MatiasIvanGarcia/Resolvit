@@ -1210,12 +1210,12 @@ function MyPlans({ session }: { session: Session }) {
 
 {/* Hover actions */}
 <div className="opacity-0 group-hover:opacity-100 transition-opacity space-y-2">
-  <div className="flex gap-2 flex-wrap">
-    {/* Si tiene respuestas, primero Respuestas */}
+  <div className="flex gap-2">
+    {/* ✅ Respuestas solo si hay */}
     {p.has_responses && (
       <button
         className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20"
-        onClick={() => navigate(`/responses?plan=${encodeURIComponent(p.id)}`)}
+        onClick={() => navigate(`/results/${encodeURIComponent(p.id)}`)}
       >
         Respuestas
       </button>
@@ -1228,19 +1228,25 @@ function MyPlans({ session }: { session: Session }) {
       Editar
     </button>
 
-    <button
-      disabled={!share}
-      className={
-        "rounded-2xl bg-white/10 border border-white/15 px-3 py-2 text-xs font-semibold hover:bg-white/15 disabled:opacity-50"
-      }
-      onClick={async () => {
-        if (!share) return;
-        await navigator.clipboard.writeText(share);
-        alert("Link copiado ✅");
-      }}
-    >
-      Link
-    </button>
+    {share ? (
+      <button
+        className="rounded-2xl bg-white/10 border border-white/15 px-3 py-2 text-xs font-semibold hover:bg-white/15"
+        onClick={async () => {
+          await navigator.clipboard.writeText(share);
+          alert("Link copiado ✅");
+        }}
+      >
+        Link
+      </button>
+    ) : (
+      <button
+        disabled
+        className="rounded-2xl bg-white/5 border border-white/10 px-3 py-2 text-xs font-semibold text-white/40 cursor-not-allowed"
+        title="No publicado todavía"
+      >
+        Link
+      </button>
+    )}
 
     <button
       className="rounded-2xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/20"
@@ -1260,7 +1266,11 @@ function MyPlans({ session }: { session: Session }) {
       Eliminar
     </button>
   </div>
+
+  {/* Si querés mantener el bloque “no publicado” debajo, lo podés dejar.
+      Pero vos querías sacar la URL visible, así que con el botón Link alcanza. */}
 </div>
+
 
 
                   </div>
@@ -1627,6 +1637,183 @@ const q = orderedQuestions[idx];
 );
     }
 
+function PlanResults({ session }: { session: Session }) {
+  const planId = window.location.pathname.split("/").pop() || "";
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const [plan, setPlan] = React.useState<any>(null);
+  const [stats, setStats] = React.useState<any>(null);
+
+  async function authedFetch(path: string, init?: RequestInit) {
+    const token = session.access_token;
+    const res = await fetch(path, {
+      ...(init || {}),
+      headers: {
+        ...(init?.headers || {}),
+        Authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data ? JSON.stringify(data) : "Request failed");
+    return data;
+  }
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const data = await authedFetch(`/api/private/plan/${encodeURIComponent(planId)}/stats`, {
+          method: "GET",
+        });
+
+        if (cancelled) return;
+        setPlan(data.plan);
+        setStats(data.stats);
+      } catch (e: any) {
+        if (!cancelled) setError(String(e.message || e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [planId]);
+
+  const bgUrl = plan?.background_image_url ?? null;
+
+  if (loading) {
+    return <div className="min-h-screen bg-slate-950 text-white p-8">Cargando…</div>;
+  }
+
+  if (error || !plan || !stats) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white p-8">
+        <div className="text-2xl font-semibold">No se pudo cargar el resultado</div>
+        <pre className="mt-4 text-white/70 whitespace-pre-wrap">{error || "error"}</pre>
+        <button
+          className="mt-6 rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
+          onClick={() => navigate("/plans")}
+        >
+          Volver a Mis planes
+        </button>
+      </div>
+    );
+  }
+
+  const total = Number(stats?.total_responses || 0);
+  const questions = Array.isArray(stats?.questions) ? stats.questions : [];
+
+  return (
+    <div className="min-h-screen text-white relative overflow-hidden">
+      {/* Fondo wallpaper */}
+      {bgUrl ? (
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage: `url(${bgUrl})`,
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            backgroundRepeat: "no-repeat",
+          }}
+        />
+      ) : (
+        <div className="absolute inset-0 bg-slate-950" />
+      )}
+
+      {/* Overlay */}
+      <div className="absolute inset-0 bg-slate-950/60" />
+
+      {/* Contenido */}
+      <div className="relative">
+        <div className="mx-auto max-w-6xl px-5 py-7 md:py-10">
+          <header className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-xs tracking-widest text-white/60">INVITACIÓN</div>
+              <div className="text-lg md:text-xl font-semibold">
+                {plan.person_name ? `Plan para ${plan.person_name}` : plan.title}
+              </div>
+
+              <div className="mt-5 text-4xl md:text-5xl font-semibold leading-tight">
+                Resultado <span className="ml-2">📊</span>
+              </div>
+
+              <div className="mt-2 text-white/70 text-sm">
+                Respuestas registradas: <span className="text-white font-semibold">{total}</span>
+              </div>
+            </div>
+
+            <button
+              className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm hover:bg-white/15"
+              onClick={() => navigate("/plans")}
+            >
+              Mis planes
+            </button>
+          </header>
+
+          <main className="mt-8">
+            <div className="rounded-3xl border border-white/15 bg-white/5 p-5 md:p-7">
+              {total === 0 ? (
+                <div className="text-white/80">
+                  Todavía no hay respuestas. Compartí el link del plan y volvé más tarde 😄
+                </div>
+              ) : (
+                <div className="space-y-8">
+                  {questions.map((q: any) => {
+                    const opts = Array.isArray(q.options) ? q.options : [];
+                    return (
+                      <div key={q.question_id} className="space-y-3">
+                        <div className="text-sm text-white/60">
+                          #{q.ord} decisión
+                        </div>
+
+                        <div className="text-xl md:text-2xl font-semibold">
+                          {q.subtitle?.trim() ? q.subtitle : q.title || "Decisión"}
+                        </div>
+
+                        <div className="mt-3 space-y-3">
+                          {opts.map((o: any) => {
+                            const pct = Number(o.pct || 0);
+                            const votes = Number(o.votes || 0);
+                            return (
+                              <div key={o.option_id} className="space-y-2">
+                                <div className="flex items-center justify-between gap-4">
+                                  <div className="text-white/90">{o.label || "—"}</div>
+                                  <div className="text-white/70 text-sm">
+                                    {votes} · {pct}%
+                                  </div>
+                                </div>
+
+                                <div className="h-3 rounded-full bg-black/30 border border-white/10 overflow-hidden">
+                                  <div
+                                    className="h-full rounded-full bg-white/70"
+                                    style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </main>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 export default function App() {
   const path = usePath();
   const session = useSession();
@@ -1635,6 +1822,14 @@ export default function App() {
   if (path === "/expired") return <Expired />;
 
   if (path === "/login") return <Login />;
+  
+  if (path.startsWith("/results/")) {
+    if (!session) {
+      navigate("/login");
+      return null;
+    }
+    return <PlanResults session={session} />;
+  }
 
   if (path === "/plans") {
   if (!session) {
