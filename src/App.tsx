@@ -107,7 +107,7 @@ function Home({ session }: { session: Session | null }) {
             Creá invitaciones interactivas para armar planes.
           </h1>
           <p className="text-white/70 text-lg">
-            Armás preguntas con dos opciones (con fotos).
+            Armás planes con opciones para resolver tu evento.
           </p>
 
           <div className="flex flex-wrap gap-3 pt-2">
