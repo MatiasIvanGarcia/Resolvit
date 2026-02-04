@@ -1393,23 +1393,48 @@ React.useEffect(() => {
   }
 
 async function finalize(finalAnswers: Record<string, string>) {
-  const res = await fetch(`/api/public/submit/${encodeURIComponent(code)}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ answers: finalAnswers, voter_name: voterName.trim() }),
-  });
-  const data = await res.json();
-  setResult(data);
+  try {
+    const res = await fetch(`/api/public/submit/${encodeURIComponent(code)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        answers: finalAnswers,
+        voter_name: voterName.trim(),
+      }),
+    });
+
+    const text = await res.text();
+    const data = text ? JSON.parse(text) : null;
+
+    if (!res.ok) {
+      setResult({
+        invitation_text:
+          "Error generando el resultado.\n\n" +
+          (data ? JSON.stringify(data, null, 2) : `HTTP ${res.status}`),
+      });
+      return;
+    }
+
+    setResult(data);
+  } catch (e: any) {
+    setResult({
+      invitation_text:
+        "Error de red al enviar tu voto.\n\n" + String(e?.message || e),
+    });
+  }
 }
 
-  if (loading) return <div className="min-h-screen bg-slate-950 text-white p-8">Cargando…</div>;
 
-  if (!plan || plan.status !== "ok") {
-    navigate("/expired");
-    return null;
-  }
+if (loading) {
+  return <div className="min-h-screen bg-slate-950 text-white p-8">Cargando…</div>;
+}
 
-/* ✅ PUNTO 4: BLOQUEO POR NOMBRE (ACÁ) */
+if (!plan || plan.status !== "ok") {
+  navigate("/expired");
+  return null;
+}
+
+/* ✅ PUNTO 4: BLOQUEO POR NOMBRE (ACÁ VA) */
 if (!nameReady) {
   const bgUrl = (plan.plan as any).background_image_url ?? null;
 
@@ -1423,46 +1448,39 @@ if (!nameReady) {
             backgroundImage: `url(${bgUrl})`,
             backgroundSize: "cover",
             backgroundPosition: "center",
-            backgroundRepeat: "no-repeat",
           }}
         />
       ) : (
         <div className="absolute inset-0 bg-slate-950" />
       )}
 
-      {/* Overlay */}
-      <div className="absolute inset-0 bg-slate-950/55" />
+      <div className="absolute inset-0 bg-slate-950/70" />
 
-      {/* Card */}
-      <div className="relative mx-auto max-w-6xl px-5 py-10">
-        <div className="rounded-3xl border border-white/15 bg-white/5 p-6 md:p-8 max-w-xl">
-          <div className="text-xs tracking-widest text-white/60">INVITACIÓN</div>
-          <div className="mt-2 text-3xl md:text-4xl font-semibold leading-tight">
-            Ingresá tu nombre
-          </div>
-          <div className="mt-2 text-white/70">
-            Es obligatorio para contabilizar tu voto. Después podés reiniciar y cambiar tu elección.
+      <div className="relative flex items-center justify-center min-h-screen px-5">
+        <div className="w-full max-w-md rounded-3xl border border-white/15 bg-white/5 p-6 shadow-2xl">
+          <div className="text-2xl font-semibold mb-2">
+            Antes de empezar
           </div>
 
-          <div className="mt-5">
-            <input
-              autoFocus
-              className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-              value={voterName}
-              onChange={(e) => setVoterName(e.target.value)}
-              placeholder="Ej: Alexis"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && voterName.trim()) setNameReady(true);
-              }}
-            />
-            <button
-              disabled={!voterName.trim()}
-              className="mt-4 w-full rounded-2xl bg-white text-slate-950 px-4 py-3 font-semibold disabled:opacity-50"
-              onClick={() => setNameReady(true)}
-            >
-              Empezar
-            </button>
+          <div className="text-white/70 mb-4">
+            Ingresá tu nombre para registrar tu voto.
           </div>
+
+          <input
+            autoFocus
+            value={voterName}
+            onChange={(e) => setVoterName(e.target.value)}
+            placeholder="Tu nombre"
+            className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+          />
+
+          <button
+            disabled={!voterName.trim()}
+            onClick={() => setNameReady(true)}
+            className="mt-4 w-full rounded-2xl bg-white text-slate-950 px-4 py-3 font-semibold disabled:opacity-50"
+          >
+            Comenzar
+          </button>
         </div>
       </div>
     </div>
