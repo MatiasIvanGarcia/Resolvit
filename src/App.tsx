@@ -68,7 +68,7 @@ function Home({ session }: { session: Session | null }) {
   return (
     <div className="min-h-screen bg-slate-950 text-white">
       <header className="mx-auto max-w-6xl px-6 py-6 flex items-center justify-between">
-        <div className="text-lg font-semibold">Plan Invitación</div>
+        <div className="text-lg font-semibold">Resolvit</div>
 
         <div className="flex items-center gap-3">
           {session ? (
@@ -178,7 +178,7 @@ function Login() {
     <div className="min-h-screen bg-slate-950 text-white">
       <header className="mx-auto max-w-6xl px-6 py-6 flex items-center justify-between">
         <button className="text-lg font-semibold" onClick={() => navigate("/")}>
-          Plan Invitación
+          Resolvit
         </button>
       </header>
 
@@ -769,7 +769,7 @@ async function saveMessageTemplate() {
       className="text-lg font-semibold"
       onClick={() => navigate("/")}
     >
-      Plan Invitación
+      Resolvit
     </button>
 
   </div>
@@ -1158,7 +1158,7 @@ React.useEffect(() => {
     <div className="min-h-screen bg-slate-950 text-white">
       <header className="mx-auto max-w-6xl px-6 py-6 flex items-center justify-between">
         <button className="text-lg font-semibold" onClick={() => navigate("/")}>
-          Plan Invitación
+          Resolvit
         </button>
 
         <div className="flex items-center gap-2">
