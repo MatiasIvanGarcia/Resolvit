@@ -176,6 +176,79 @@ export default {
         return json(data?.[0] ?? data);
       }
 
+      // GET /api/private/plan/:id/stats  -> stats + plan meta (para background/titulo)
+if (
+  request.method === "GET" &&
+  url.pathname.startsWith("/api/private/plan/") &&
+  url.pathname.endsWith("/stats")
+) {
+  const token = getAuthToken(request);
+  if (!token) return json({ status: "unauthorized" }, 401);
+
+  const parts = url.pathname.split("/");
+  const planId = parts[4]; // /api/private/plan/:id/stats
+  if (!planId) return json({ status: "missing_plan_id" }, 400);
+
+  // 1) plan meta (RLS aplica: solo dueño)
+  const pRes = await supabaseRest(
+    env,
+    `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}&select=id,title,person_name,status,background_image_url`,
+    { method: "GET" },
+    token
+  );
+  if (!pRes.ok) return json({ status: "error", step: "get_plan", detail: pRes.data }, 400);
+
+  const plan = pRes.data?.[0] ?? null;
+  if (!plan) return json({ status: "not_found" }, 404);
+
+  // 2) stats via RPC (security definer)
+  const sRes = await supabaseRest(
+    env,
+    `/rest/v1/rpc/get_plan_stats`,
+    { method: "POST", body: JSON.stringify({ p_plan_id: plan.id }) },
+    token
+  );
+  if (!sRes.ok) return json({ status: "error", step: "get_stats", detail: sRes.data }, 400);
+
+  return json({ status: "ok", plan, stats: sRes.data });
+}
+// GET /api/private/plan/:id/stats  -> stats + plan meta (para background/titulo)
+if (
+  request.method === "GET" &&
+  url.pathname.startsWith("/api/private/plan/") &&
+  url.pathname.endsWith("/stats")
+) {
+  const token = getAuthToken(request);
+  if (!token) return json({ status: "unauthorized" }, 401);
+
+  const parts = url.pathname.split("/");
+  const planId = parts[4]; // /api/private/plan/:id/stats
+  if (!planId) return json({ status: "missing_plan_id" }, 400);
+
+  // 1) plan meta (RLS aplica: solo dueño)
+  const pRes = await supabaseRest(
+    env,
+    `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}&select=id,title,person_name,status,background_image_url`,
+    { method: "GET" },
+    token
+  );
+  if (!pRes.ok) return json({ status: "error", step: "get_plan", detail: pRes.data }, 400);
+
+  const plan = pRes.data?.[0] ?? null;
+  if (!plan) return json({ status: "not_found" }, 404);
+
+  // 2) stats via RPC (security definer)
+  const sRes = await supabaseRest(
+    env,
+    `/rest/v1/rpc/get_plan_stats`,
+    { method: "POST", body: JSON.stringify({ p_plan_id: plan.id }) },
+    token
+  );
+  if (!sRes.ok) return json({ status: "error", step: "get_stats", detail: sRes.data }, 400);
+
+  return json({ status: "ok", plan, stats: sRes.data });
+}
+
       // GET /api/private/plan/:id/builder  -> plan + questions + options
 if (request.method === "GET" && url.pathname.startsWith("/api/private/plan/") && url.pathname.endsWith("/builder")) {
   const token = getAuthToken(request);
