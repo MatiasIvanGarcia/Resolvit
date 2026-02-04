@@ -1077,6 +1077,29 @@ function MyPlans({ session }: { session: Session }) {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
+  const [toast, setToast] = React.useState<{ open: boolean; text: string }>({
+  open: false,
+  text: "",
+});
+const toastTimer = React.useRef<number | null>(null);
+
+function showToast(text: string) {
+  setToast({ open: true, text });
+
+  if (toastTimer.current) window.clearTimeout(toastTimer.current);
+  toastTimer.current = window.setTimeout(() => {
+    setToast((t) => ({ ...t, open: false }));
+  }, 2200);
+}
+
+// opcional: cleanup
+React.useEffect(() => {
+  return () => {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+  };
+}, []);
+
+
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -1224,7 +1247,7 @@ function MyPlans({ session }: { session: Session }) {
         className="rounded-2xl bg-white/10 border border-white/15 px-3 py-2 text-xs font-semibold hover:bg-white/15"
         onClick={async () => {
           await navigator.clipboard.writeText(share);
-          alert("Link copiado ✅");
+showToast("Link copiado correctamente");
         }}
       >
         Link
@@ -1273,6 +1296,24 @@ function MyPlans({ session }: { session: Session }) {
           </div>
         )}
       </main>
+
+      {/* ✅ TOAST (PUNTO 2) */}
+      <div
+        className={
+          "fixed left-1/2 -translate-x-1/2 bottom-5 z-[9999] " +
+          "transition-all duration-300 " +
+          (toast.open
+            ? "opacity-100 translate-y-0"
+            : "opacity-0 translate-y-6 pointer-events-none")
+        }
+      >
+        <div className="rounded-2xl border border-emerald-400/30 bg-emerald-500/15 px-5 py-3 shadow-2xl backdrop-blur">
+          <div className="text-sm font-semibold text-emerald-100 text-center">
+            {toast.text}
+          </div>
+        </div>
+      </div>
+
     </div>
   );
 }
