@@ -1406,24 +1406,32 @@ async function finalize(finalAnswers: Record<string, string>) {
     const text = await res.text();
     const data = text ? JSON.parse(text) : null;
 
+    // 👇 Si HTTP no OK, mostrás el error en pantalla
     if (!res.ok) {
       setResult({
         invitation_text:
-          "Error generando el resultado.\n\n" +
-          (data ? JSON.stringify(data, null, 2) : `HTTP ${res.status}`),
+          `Error HTTP ${res.status}\n\n` + (data ? JSON.stringify(data, null, 2) : ""),
       });
       return;
     }
 
+    // 👇 Si vino OK pero status no es "ok", igual mostrás el detalle
+    if (!data || data.status !== "ok" || typeof data.invitation_text !== "string") {
+      setResult({
+        invitation_text:
+          "No se pudo generar el mensaje final.\n\n" + JSON.stringify(data, null, 2),
+      });
+      return;
+    }
+
+    // ✅ Caso feliz
     setResult(data);
   } catch (e: any) {
     setResult({
-      invitation_text:
-        "Error de red al enviar tu voto.\n\n" + String(e?.message || e),
+      invitation_text: "Error de red.\n\n" + String(e?.message || e),
     });
   }
 }
-
 
 if (loading) {
   return <div className="min-h-screen bg-slate-950 text-white p-8">Cargando…</div>;
@@ -1600,7 +1608,7 @@ const q = orderedQuestions[idx];
     
                       <div className="rounded-3xl border border-white/15 bg-white/5 p-5 md:p-7 shadow-2xl">
                         <pre className="whitespace-pre-wrap text-base md:text-lg leading-relaxed text-white/90">
-                          {(result?.invitation_text ? result.invitation_text.replace(/\\n/g, "\n") : "Generando…")}
+                          {(result?.invitation_text ?? "Generando…").replace(/\\n/g, "\n")}
                         </pre>
                       </div>
                     </motion.section>
