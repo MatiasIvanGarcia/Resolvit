@@ -1518,7 +1518,7 @@ if (!nameReady) {
   const bgUrl = (plan.plan as any).background_image_url ?? null;
 
   return (
-    <div className="min-h-screen text-white relative overflow-hidden">
+    <div className="fixed inset-0 h-[100dvh] w-screen text-white overflow-hidden bg-slate-950">
       {/* Fondo */}
       {bgUrl ? (
         <div
@@ -1593,7 +1593,7 @@ const q = orderedQuestions[idx];
   const bgUrl = (plan.plan as any).background_image_url ?? null;
     
       return (
-        <div className="min-h-screen text-white relative overflow-hidden">
+        <div className="fixed inset-0 h-[100dvh] w-screen text-white overflow-hidden bg-slate-950">
           {/* ✅ Fondo wallpaper (atrás de todo) */}
           {bgUrl ? (
             <div
@@ -1613,7 +1613,7 @@ const q = orderedQuestions[idx];
           <div className="absolute inset-0 bg-slate-950/55" />
     
           {/* ✅ Contenido arriba del fondo */}
-          <div className="relative">
+          <div className="relative z-10 h-full overflow-y-auto">
             <div className="mx-auto max-w-6xl px-5 py-7 md:py-10">
               <header className="flex items-center justify-between gap-4">
                 <div>
@@ -1772,7 +1772,7 @@ function PlanResults({ session }: { session: Session }) {
   const questions = Array.isArray(stats?.questions) ? stats.questions : [];
 
   return (
-    <div className="min-h-screen text-white relative overflow-hidden">
+    <div className="fixed inset-0 h-[100dvh] w-screen text-white overflow-hidden bg-slate-950">
       {/* Fondo wallpaper */}
       {bgUrl ? (
         <div
@@ -1792,7 +1792,7 @@ function PlanResults({ session }: { session: Session }) {
       <div className="absolute inset-0 bg-slate-950/60" />
 
       {/* Contenido */}
-      <div className="relative">
+      <div className="relative z-10 h-full overflow-y-auto">
         <div className="mx-auto max-w-6xl px-5 py-7 md:py-10">
           <header className="flex items-center justify-between gap-4">
             <div>
