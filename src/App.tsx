@@ -1613,7 +1613,7 @@ const q = orderedQuestions[idx];
           <div className="absolute inset-0 bg-slate-950/55" />
     
           {/* ✅ Contenido arriba del fondo */}
-          <div className="relative z-10 h-full overflow-y-auto">
+          <div className="relative">
             <div className="mx-auto max-w-6xl px-5 py-7 md:py-10">
               <header className="flex items-center justify-between gap-4">
                 <div>
@@ -1792,7 +1792,7 @@ function PlanResults({ session }: { session: Session }) {
       <div className="absolute inset-0 bg-slate-950/60" />
 
       {/* Contenido */}
-      <div className="relative z-10 h-full overflow-y-auto">
+      <div className="relative">
         <div className="mx-auto max-w-6xl px-5 py-7 md:py-10">
           <header className="flex items-center justify-between gap-4">
             <div>
