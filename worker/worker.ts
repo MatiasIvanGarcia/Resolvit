@@ -833,13 +833,50 @@ if (
       // =========================
       // Short link /i/:code
       // =========================
+// =========================================================
+      // Short link /i/:code (CON PREVIEW PARA WHATSAPP)
+      // =========================================================
       if (url.pathname.startsWith("/i/")) {
         const code = url.pathname.split("/").pop() || "";
         if (!isValidCode(code)) return redirect("/expired");
 
+        // 1. Buscamos los datos del plan (tu RPC ya trae la imagen)
         const { ok, data } = await supabaseRpc(env, "get_public_plan_by_code", { p_code: code });
+        
         if (!ok || !data || data.status !== "ok") return redirect("/expired");
 
+        // 2. Detectamos si el que visita es un Bot (WhatsApp, FB, etc.)
+        const ua = request.headers.get("user-agent") || "";
+        const isBot = /WhatsApp|facebookexternalhit|Twitterbot|LinkedInBot/i.test(ua);
+
+        if (isBot) {
+          // SI ES BOT: Le damos el HTML con la imagen inyectada YA MISMO
+          const plan = data.plan;
+          const imageUrl = plan.background_image_url || "https://resolvit.com/favicon-96x96.png";
+          const title = plan.person_name ? `Plan para ${plan.person_name}` : plan.title;
+
+          const indexRes = await env.ASSETS!.fetch(new Request(new URL("/index.html", url).toString()));
+          let htmlText = await indexRes.text();
+
+          const ogTags = `
+    <title>${escapeHtml(title)} - Resolvit</title>
+    <meta property="og:title" content="${escapeHtml(title)}" />
+    <meta property="og:description" content="¡Te invitaron a un plan! Entrá para elegir qué prefieres hacer." />
+    <meta property="og:image" content="${imageUrl}" />
+    <meta property="og:url" content="${url.href}" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:image" content="${imageUrl}">
+          `;
+
+          htmlText = htmlText.replace("</head>", `${ogTags}</head>`);
+          
+          return new Response(htmlText, {
+            headers: { "content-type": "text/html; charset=utf-8" }
+          });
+        }
+
+        // SI ES USUARIO: Redirección normal a la app
         return redirect(`/invite/${encodeURIComponent(code)}`);
       }
 
