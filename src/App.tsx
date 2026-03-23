@@ -1518,7 +1518,7 @@ if (!nameReady) {
   const bgUrl = (plan.plan as any).background_image_url ?? null;
 
   return (
-    <div className="fixed inset-0 h-[100dvh] w-screen text-white overflow-hidden bg-slate-950">
+    <div className="min-h-screen text-white relative overflow-hidden">
       {/* Fondo */}
       {bgUrl ? (
         <div
@@ -1593,7 +1593,7 @@ const q = orderedQuestions[idx];
   const bgUrl = (plan.plan as any).background_image_url ?? null;
     
       return (
-        <div className="fixed inset-0 h-[100dvh] w-screen text-white overflow-hidden bg-slate-950">
+        <div className="min-h-screen text-white relative overflow-hidden">
           {/* ✅ Fondo wallpaper (atrás de todo) */}
           {bgUrl ? (
             <div
@@ -1772,7 +1772,7 @@ function PlanResults({ session }: { session: Session }) {
   const questions = Array.isArray(stats?.questions) ? stats.questions : [];
 
   return (
-    <div className="fixed inset-0 h-[100dvh] w-screen text-white overflow-hidden bg-slate-950">
+    <div className="min-h-screen text-white relative overflow-hidden">
       {/* Fondo wallpaper */}
       {bgUrl ? (
         <div
