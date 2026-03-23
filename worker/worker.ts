@@ -844,6 +844,44 @@ if (
       }
 
       // =========================
+      // Inyección de Meta Tags para WhatsApp (/invite/:code)
+      // =========================
+      if (url.pathname.startsWith("/invite/")) {
+        const code = url.pathname.split("/").pop() || "";
+        
+        // 1. Buscamos los datos del plan en Supabase para obtener la imagen
+        const { ok, data } = await supabaseRpc(env, "get_public_plan_by_code", { p_code: code });
+        
+        // Si el plan existe y está OK, preparamos el HTML personalizado
+        if (ok && data && data.status === "ok") {
+          const plan = data.plan;
+          const imageUrl = plan.background_image_url || "https://tu-dominio.com/favicon-96x96.png";
+          const title = plan.person_name ? `Plan para ${plan.person_name}` : plan.title;
+
+          // Cargamos el index.html original de tus Assets
+          const indexRes = await env.ASSETS!.fetch(new Request(new URL("/index.html", url).toString()));
+          let htmlText = await indexRes.text();
+
+          // Preparamos los tags de Open Graph
+          const ogTags = `
+    <title>${escapeHtml(title)} - Resolvit</title>
+    <meta property="og:title" content="${escapeHtml(title)}" />
+    <meta property="og:description" content="¡Te invitaron a un plan! Entrá para elegir qué prefieres hacer." />
+    <meta property="og:image" content="${imageUrl}" />
+    <meta property="og:url" content="${url.href}" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:image" content="${imageUrl}">
+          `;
+
+          // Inyectamos los tags antes de que cierre el </head>
+          htmlText = htmlText.replace("</head>", `${ogTags}</head>`);
+
+          return html(htmlText);
+        }
+      }
+
+      // =========================
       // Assets + SPA fallback
       // =========================
       if (!env.ASSETS) {
