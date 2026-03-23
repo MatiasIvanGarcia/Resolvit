@@ -1518,7 +1518,7 @@ if (!nameReady) {
   const bgUrl = (plan.plan as any).background_image_url ?? null;
 
   return (
-    <div className="min-h-[100dvh] text-white relative overflow-hidden bg-slate-950">
+    <div className="min-h-screen text-white relative overflow-hidden">
       {/* Fondo */}
       {bgUrl ? (
         <div
@@ -1593,11 +1593,11 @@ const q = orderedQuestions[idx];
   const bgUrl = (plan.plan as any).background_image_url ?? null;
     
       return (
-        <div className="min-h-[100dvh] text-white relative overflow-hidden bg-slate-950">
+        <div className="min-h-screen text-white relative overflow-hidden">
           {/* ✅ Fondo wallpaper (atrás de todo) */}
           {bgUrl ? (
             <div
-              className="fixed inset-0 w-full h-[100dvh] -z-10"
+              className="absolute inset-0"
               style={{
                 backgroundImage: `url(${bgUrl})`,
                 backgroundSize: "cover",
@@ -1610,7 +1610,7 @@ const q = orderedQuestions[idx];
           )}
     
           {/* ✅ Overlay para que se lea (subí/bajá opacidad) */}
-          <div className="fixed inset-0 bg-slate-950/55 -z-10" />
+          <div className="absolute inset-0 bg-slate-950/55" />
     
           {/* ✅ Contenido arriba del fondo */}
           <div className="relative">
@@ -1772,11 +1772,11 @@ function PlanResults({ session }: { session: Session }) {
   const questions = Array.isArray(stats?.questions) ? stats.questions : [];
 
   return (
-    <div className="min-h-[100dvh] text-white relative overflow-hidden bg-slate-950">
+    <div className="min-h-screen text-white relative overflow-hidden">
       {/* Fondo wallpaper */}
       {bgUrl ? (
         <div
-          className="fixed inset-0 w-full h-[100dvh] -z-10"
+          className="absolute inset-0"
           style={{
             backgroundImage: `url(${bgUrl})`,
             backgroundSize: "cover",
