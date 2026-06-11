@@ -102,6 +102,30 @@ async function supabaseRest(env: Env, path: string, init: RequestInit, userToken
   return { ok: res.ok, status: res.status, data };
 }
 
+async function renderOgs(env: Env, code: string, url: URL): Promise<Response | null> {
+  const { ok, data } = await supabaseRpc(env, "get_public_plan_by_code", { p_code: code });
+  if (!ok || !data || data.status !== "ok") return null;
+
+  const plan = data.plan;
+  const imageUrl = plan.background_image_url || "https://resolvit.com/favicon-96x96.png";
+  const title = plan.person_name ? `Plan para ${plan.person_name}` : plan.title;
+  const ogTags = `
+    <title>${escapeHtml(title)} - Resolvit</title>
+    <meta property="og:title" content="${escapeHtml(title)}" />
+    <meta property="og:description" content="¡Te invitaron a un plan! Entrá para elegir qué prefieres hacer." />
+    <meta property="og:image" content="${imageUrl}" />
+    <meta property="og:url" content="${url.href}" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:image" content="${imageUrl}">
+  `;
+
+  const indexRes = await env.ASSETS!.fetch(new Request(new URL("/index.html", url).toString()));
+  let htmlText = await indexRes.text();
+  htmlText = htmlText.replace("</head>", `${ogTags}</head>`);
+  return html(htmlText);
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
@@ -330,8 +354,7 @@ if (request.method === "GET" && url.pathname.startsWith("/api/private/plan/") &&
   });
 }
 
-// PATCH /api/private/plan/:id  -> editar meta del plan (title/person/background/templates)
-// PATCH /api/private/plan/:id  -> editar meta del plan (title/person/background)
+// PATCH /api/private/plan/:id  -> editar meta del plan (title/person/background/templates/start_question_id)
 if (
   request.method === "PATCH" &&
   /^\/api\/private\/plan\/[^/]+$/.test(url.pathname) // exact match
@@ -854,82 +877,21 @@ if (
         const code = url.pathname.split("/").pop() || "";
         if (!isValidCode(code)) return redirect("/expired");
 
-        // 1. Buscamos los datos del plan (tu RPC ya trae la imagen)
-        const { ok, data } = await supabaseRpc(env, "get_public_plan_by_code", { p_code: code });
-        
-        if (!ok || !data || data.status !== "ok") return redirect("/expired");
-
-        // 2. Detectamos si el que visita es un Bot (WhatsApp, FB, etc.)
         const ua = request.headers.get("user-agent") || "";
         const isBot = /WhatsApp|facebookexternalhit|Twitterbot|LinkedInBot/i.test(ua);
 
         if (isBot) {
-          // SI ES BOT: Le damos el HTML con la imagen inyectada YA MISMO
-          const plan = data.plan;
-          const imageUrl = plan.background_image_url || "https://resolvit.com/favicon-96x96.png";
-          const title = plan.person_name ? `Plan para ${plan.person_name}` : plan.title;
-
-          const indexRes = await env.ASSETS!.fetch(new Request(new URL("/index.html", url).toString()));
-          let htmlText = await indexRes.text();
-
-          const ogTags = `
-    <title>${escapeHtml(title)} - Resolvit</title>
-    <meta property="og:title" content="${escapeHtml(title)}" />
-    <meta property="og:description" content="¡Te invitaron a un plan! Entrá para elegir qué prefieres hacer." />
-    <meta property="og:image" content="${imageUrl}" />
-    <meta property="og:url" content="${url.href}" />
-    <meta property="og:type" content="website" />
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:image" content="${imageUrl}">
-          `;
-
-          htmlText = htmlText.replace("</head>", `${ogTags}</head>`);
-          
-          return new Response(htmlText, {
-            headers: { "content-type": "text/html; charset=utf-8" }
-          });
+          const ogRes = await renderOgs(env, code, url);
+          if (ogRes) return ogRes;
         }
 
-        // SI ES USUARIO: Redirección normal a la app
         return redirect(`/invite/${encodeURIComponent(code)}`);
       }
 
-      // =========================
-      // Inyección de Meta Tags para WhatsApp (/invite/:code)
-      // =========================
       if (url.pathname.startsWith("/invite/")) {
         const code = url.pathname.split("/").pop() || "";
-        
-        // 1. Buscamos los datos del plan en Supabase para obtener la imagen
-        const { ok, data } = await supabaseRpc(env, "get_public_plan_by_code", { p_code: code });
-        
-        // Si el plan existe y está OK, preparamos el HTML personalizado
-        if (ok && data && data.status === "ok") {
-          const plan = data.plan;
-          const imageUrl = plan.background_image_url || "https://tu-dominio.com/favicon-96x96.png";
-          const title = plan.person_name ? `Plan para ${plan.person_name}` : plan.title;
-
-          // Cargamos el index.html original de tus Assets
-          const indexRes = await env.ASSETS!.fetch(new Request(new URL("/index.html", url).toString()));
-          let htmlText = await indexRes.text();
-
-          // Preparamos los tags de Open Graph
-          const ogTags = `
-    <title>${escapeHtml(title)} - Resolvit</title>
-    <meta property="og:title" content="${escapeHtml(title)}" />
-    <meta property="og:description" content="¡Te invitaron a un plan! Entrá para elegir qué prefieres hacer." />
-    <meta property="og:image" content="${imageUrl}" />
-    <meta property="og:url" content="${url.href}" />
-    <meta property="og:type" content="website" />
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:image" content="${imageUrl}">
-          `;
-
-          // Inyectamos los tags antes de que cierre el </head>
-          htmlText = htmlText.replace("</head>", `${ogTags}</head>`);
-
-          return html(htmlText);
-        }
+        const ogRes = await renderOgs(env, code, url);
+        if (ogRes) return ogRes;
       }
 
       // =========================

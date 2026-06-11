@@ -20,6 +20,7 @@ export function CreateLinear({ session }: { session: { access_token: string } })
   const token = session.access_token;
 
   const [busy, setBusy] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const [plan, setPlan] = React.useState<PlanRow | null>(null);
@@ -83,7 +84,7 @@ export function CreateLinear({ session }: { session: { access_token: string } })
   }
 
   async function loadPlanForEdit(planId: string) {
-    setBusy(true);
+    setLoading(true);
     setError(null);
     try {
       const data = await authedFetch(`/api/private/plan/${encodeURIComponent(planId)}/full`, token, { method: "GET" });
@@ -117,7 +118,7 @@ export function CreateLinear({ session }: { session: { access_token: string } })
     } catch (e: any) {
       setError(String(e.message || e));
     } finally {
-      setBusy(false);
+      setLoading(false);
     }
   }
 
@@ -581,7 +582,17 @@ export function CreateLinear({ session }: { session: { access_token: string } })
         </button>
       </header>
 
+      {loading && (
+        <div className="mx-auto max-w-6xl px-6 text-white/70">Cargando plan...</div>
+      )}
+
       <main className="mx-auto max-w-6xl px-6 pb-16">
+        {busy && plan && (
+          <div className="mb-5 rounded-2xl border border-teal-500/30 bg-teal-500/10 p-3 text-sm text-teal-200">
+            Procesando...
+          </div>
+        )}
+
         {error && (
           <div className="mb-5 rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200 whitespace-pre-wrap">
             {error}
