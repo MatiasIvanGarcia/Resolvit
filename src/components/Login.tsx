@@ -2,6 +2,10 @@ import React from "react";
 import { navigate } from "../lib/navigate";
 import { supabase } from "../lib/supabase";
 
+function getParam(name: string) {
+  try { return new URL(window.location.href).searchParams.get(name); } catch { return null; }
+}
+
 export function Login() {
   const [mode, setMode] = React.useState<"login" | "signup">("login");
   const [email, setEmail] = React.useState("");
@@ -9,6 +13,13 @@ export function Login() {
   const [confirm, setConfirm] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<string | null>(null);
+
+  function redirectAfterAuth() {
+    const next = getParam("next") || "/create";
+    const template = getParam("template");
+    const url = template ? `${next}?template=${template}` : next;
+    navigate(url);
+  }
 
   async function submit() {
     setMsg(null);
@@ -29,11 +40,11 @@ export function Login() {
       if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) setMsg(error.message);
-        else navigate("/create");
+        else redirectAfterAuth();
       } else {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) setMsg(error.message);
-        else navigate("/create");
+        else redirectAfterAuth();
       }
     } finally {
       setBusy(false);

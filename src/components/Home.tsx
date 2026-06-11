@@ -2,34 +2,8 @@ import React from "react";
 import { motion } from "framer-motion";
 import { navigate } from "../lib/navigate";
 import { supabase } from "../lib/supabase";
+import { getSeasonalTemplates, type Template } from "../lib/templates";
 import type { Session } from "@supabase/supabase-js";
-
-const SEASONS = [
-  { label: "San Valentín", emoji: "\u2764\uFE0F", month: 2, day: 14, color: "from-rose-500/20 to-pink-600/20", border: "border-rose-400/30" },
-  { label: "Día del Padre", emoji: "\uD83C\uDF93", month: 6, day: 15, color: "from-amber-500/20 to-orange-600/20", border: "border-amber-400/30" },
-  { label: "Mundial 2026", emoji: "\u26BD", month: 6, day: 11, color: "from-emerald-500/20 to-teal-600/20", border: "border-emerald-400/30" },
-  { label: "Navidad", emoji: "\uD83C\uDF84", month: 12, day: 25, color: "from-red-500/20 to-green-600/20", border: "border-red-400/30" },
-  { label: "Año Nuevo", emoji: "\uD83C\uDF89", month: 12, day: 31, color: "from-violet-500/20 to-indigo-600/20", border: "border-violet-400/30" },
-  { label: "Cumpleaños", emoji: "\uD83C\uDF82", month: 0, day: 0, color: "from-cyan-500/20 to-blue-600/20", border: "border-cyan-400/30" },
-];
-
-function getUpcomingSeasons(): typeof SEASONS {
-  const now = new Date();
-  const currentMonth = now.getMonth() + 1;
-  const currentDay = now.getDate();
-
-  const sorted = SEASONS.map((s) => {
-    if (s.month === 0) return { ...s, daysAway: 999 };
-    let target = new Date(now.getFullYear(), s.month - 1, s.day);
-    if (target < now) {
-      target = new Date(now.getFullYear() + 1, s.month - 1, s.day);
-    }
-    const daysAway = Math.floor((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    return { ...s, daysAway };
-  }).sort((a, b) => a.daysAway - b.daysAway);
-
-  return sorted.slice(0, 4);
-}
 
 function NodesAnimation() {
   const nodes = [
@@ -95,8 +69,38 @@ function NodesAnimation() {
   );
 }
 
+const TEMPLATE_STYLES: Record<string, { color: string; border: string }> = {
+  valentines: { color: "from-rose-500/20 to-pink-600/20", border: "border-rose-400/30" },
+  "fathers-day": { color: "from-amber-500/20 to-orange-600/20", border: "border-amber-400/30" },
+  "world-cup": { color: "from-emerald-500/20 to-teal-600/20", border: "border-emerald-400/30" },
+  christmas: { color: "from-red-500/20 to-green-600/20", border: "border-red-400/30" },
+  "new-year": { color: "from-violet-500/20 to-indigo-600/20", border: "border-violet-400/30" },
+  birthday: { color: "from-cyan-500/20 to-blue-600/20", border: "border-cyan-400/30" },
+};
+
+function formatDaysAway(template: Template): string {
+  if (template.seasonalMonth === 0) return "Siempre disponible";
+  const now = new Date();
+  let target = new Date(now.getFullYear(), template.seasonalMonth - 1, template.seasonalDay);
+  if (target < now) target = new Date(now.getFullYear() + 1, template.seasonalMonth - 1, template.seasonalDay);
+  const days = Math.floor((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  if (days === 0) return "¡Hoy!";
+  if (days === 1) return "Mañana";
+  if (days <= 7) return `En ${days} días`;
+  if (days <= 30) return `En ${Math.ceil(days / 7)} semanas`;
+  return `En ${Math.ceil(days / 30)} meses`;
+}
+
 export function Home({ session }: { session: Session | null }) {
-  const upcomingSeasons = React.useMemo(() => getUpcomingSeasons(), []);
+  const templates = React.useMemo(() => getSeasonalTemplates(), []);
+
+  function handleTemplateClick(template: Template) {
+    if (!session) {
+      navigate(`/login?next=/create&template=${template.id}`);
+    } else {
+      navigate(`/create?template=${template.id}`);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#0B0E1A] text-white">
@@ -194,22 +198,24 @@ export function Home({ session }: { session: Session | null }) {
             transition={{ duration: 0.5, delay: 0.45 }}
           >
             <h2 className="text-2xl md:text-3xl font-bold mb-2">Plantillas de temporada</h2>
-            <p className="text-white/50 mb-8">Elegí una plantilla y personalizada en minutos.</p>
+            <p className="text-white/50 mb-8">Elegí una plantilla y personalizala en minutos.</p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {upcomingSeasons.map((season) => (
-                <button
-                  key={season.label}
-                  className={`group rounded-2xl border ${season.border} bg-gradient-to-br ${season.color} p-5 text-left hover:scale-[1.02] transition-transform`}
-                  onClick={() => navigate(session ? "/create" : "/login")}
-                >
-                  <div className="text-3xl mb-3">{season.emoji}</div>
-                  <div className="font-semibold">{season.label}</div>
-                  <div className="text-sm text-white/50 mt-1">
-                    {season.month === 0 ? "Siempre disponible" : "Próximamente"}
-                  </div>
-                </button>
-              ))}
+              {templates.map((template) => {
+                const style = TEMPLATE_STYLES[template.id] || { color: "from-white/10 to-white/5", border: "border-white/15" };
+                return (
+                  <button
+                    key={template.id}
+                    className={`group rounded-2xl border ${style.border} bg-gradient-to-br ${style.color} p-5 text-left hover:scale-[1.02] transition-transform`}
+                    onClick={() => handleTemplateClick(template)}
+                  >
+                    <div className="text-3xl mb-3">{template.emoji}</div>
+                    <div className="font-semibold">{template.title}</div>
+                    <div className="text-sm text-white/50 mt-1">{template.description}</div>
+                    <div className="text-xs text-white/40 mt-2">{formatDaysAway(template)}</div>
+                  </button>
+                );
+              })}
             </div>
           </motion.div>
         </section>

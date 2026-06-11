@@ -4,6 +4,7 @@ import { authedFetch } from "../lib/authedFetch";
 import { EMPTY } from "../lib/supabase";
 import { useToast } from "../hooks/useToast";
 import { Toast } from "./Toast";
+import { getTemplateById, type Template } from "../lib/templates";
 import type { PlanRow, QuestionRow, OptionRow } from "../lib/types";
 
 function getQueryParam(name: string) {
@@ -28,6 +29,8 @@ export function CreateLinear({ session }: { session: { access_token: string } })
   const [bgUrl, setBgUrl] = React.useState("");
 
   const editingPlanId = React.useMemo(() => getQueryParam("plan"), []);
+  const templateId = React.useMemo(() => getQueryParam("template"), []);
+  const template = templateId ? getTemplateById(templateId) : null;
   const isEditing = Boolean(editingPlanId);
 
   const [questions, setQuestions] = React.useState<QuestionRow[]>([]);
@@ -39,8 +42,18 @@ export function CreateLinear({ session }: { session: { access_token: string } })
   const DEFAULT_TITLE_TMPL = "Te invito #persona a que pasemos #plan juntos";
   const DEFAULT_BODY_TMPL = "Hola #persona!!\n\n¿Te copás a #decision1?\n\nTe espero!!";
 
-  const [inviteTitleTmpl, setInviteTitleTmpl] = React.useState(DEFAULT_TITLE_TMPL);
-  const [inviteBodyTmpl, setInviteBodyTmpl] = React.useState(DEFAULT_BODY_TMPL);
+  const [inviteTitleTmpl, setInviteTitleTmpl] = React.useState(template?.inviteTitleTemplate ?? DEFAULT_TITLE_TMPL);
+  const [inviteBodyTmpl, setInviteBodyTmpl] = React.useState(template?.inviteBodyTemplate ?? DEFAULT_BODY_TMPL);
+
+  React.useEffect(() => {
+    if (template) {
+      setTitle(template.title);
+      setPersonName(template.personName);
+      setInviteTitleTmpl(template.inviteTitleTemplate);
+      setInviteBodyTmpl(template.inviteBodyTemplate);
+    }
+  }, [template]);
+
   const [savingTemplate, setSavingTemplate] = React.useState(false);
   const [saveMsg, setSaveMsg] = React.useState<string | null>(null);
 
@@ -248,21 +261,116 @@ export function CreateLinear({ session }: { session: { access_token: string } })
       setOptionsByQuestion({});
       setShareUrl(null);
 
-      setInviteTitleTmpl(DEFAULT_TITLE_TMPL);
-      setInviteBodyTmpl(DEFAULT_BODY_TMPL);
-
       await authedFetch(`/api/private/plan/${encodeURIComponent(data.id)}/templates`, token, {
         method: "PATCH",
         body: JSON.stringify({
-          invite_title_template: DEFAULT_TITLE_TMPL,
-          invite_body_template: DEFAULT_BODY_TMPL,
+          invite_title_template: inviteTitleTmpl,
+          invite_body_template: inviteBodyTmpl,
         }),
       });
+
+      if (template && template.questions.length > 0) {
+        await createPlanFromTemplate(data.id, template);
+      }
     } catch (e: any) {
       setError(String(e.message || e));
     } finally {
       setBusy(false);
     }
+  }
+
+  async function createPlanFromTemplate(planId: string, tmpl: Template) {
+    setBusy(true);
+    setError(null);
+    try {
+      let prevQuestionId: string | null = null;
+
+      for (let i = 0; i < tmpl.questions.length; i++) {
+        const tq = tmpl.questions[i];
+
+        const newQ: QuestionRow = await authedFetch("/api/private/question", token, {
+          method: "POST",
+          body: JSON.stringify({
+            plan_id: planId,
+            ord: i + 1,
+            title: tq.title,
+            subtitle: tq.subtitle,
+          }),
+        });
+
+        setQuestions((prev) => [...prev, newQ]);
+
+        if (i === 0) {
+          await authedFetch(`/api/private/plan/${encodeURIComponent(planId)}`, token, {
+            method: "PATCH",
+            body: JSON.stringify({ start_question_id: newQ.id }),
+          });
+          setPlan((p) => (p ? { ...p, start_question_id: newQ.id } as PlanRow : p));
+        }
+
+        const optPayloads = tq.options.map((opt, j) => ({
+          question_id: newQ.id,
+          ord: j + 1,
+          label: opt.label,
+          image_url: opt.image_url ?? null,
+        }));
+
+        const createdOpts: OptionRow[] = await authedFetch("/api/private/options2", token, {
+          method: "POST",
+          body: JSON.stringify({
+            question_id: newQ.id,
+            a: optPayloads[0],
+            b: optPayloads[1] || { label: "", image_url: null },
+          }),
+        });
+
+        setOptionsByQuestion((prev) => ({ ...prev, [newQ.id]: createdOpts }));
+
+        if (prevQuestionId) {
+          const prevOpts = optionsByQuestion[prevQuestionId] || createdOpts.slice();
+          const allPrevOpts = await getOrCreatePrevOpts(prevQuestionId);
+
+          for (const po of allPrevOpts) {
+            await authedFetch(`/api/private/option/${encodeURIComponent(po.id)}`, token, {
+              method: "PATCH",
+              body: JSON.stringify({ next_question_id: newQ.id }),
+            });
+          }
+
+          setOptionsByQuestion((prev) => {
+            const updated = { ...prev };
+            if (prevQuestionId && updated[prevQuestionId]) {
+              updated[prevQuestionId] = updated[prevQuestionId].map((o: OptionRow) => ({
+                ...o,
+                next_question_id: newQ.id,
+              }));
+            }
+            return updated;
+          });
+        }
+
+        prevQuestionId = newQ.id;
+      }
+    } catch (e: any) {
+      setError(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function getOrCreatePrevOpts(qid: string): Promise<OptionRow[]> {
+    const existing = optionsByQuestion[qid];
+    if (existing && existing.length > 0) return existing;
+
+    const data = await authedFetch(`/api/private/plan/${encodeURIComponent(plan!.id)}/builder`, token, {
+      method: "GET",
+    });
+
+    if (data?.options) {
+      const opts = (data.options as OptionRow[]).filter((o: OptionRow) => o.question_id === qid);
+      return opts;
+    }
+    return [];
   }
 
   async function addDecision() {
