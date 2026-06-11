@@ -32,6 +32,7 @@ export type PlanRow = {
   background_image_url?: string | null;
   invite_title_template?: string | null;
   invite_body_template?: string | null;
+  start_question_id?: string | null;
 };
 
 export type QuestionRow = {

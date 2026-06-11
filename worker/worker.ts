@@ -349,6 +349,7 @@ if (
   if (typeof body.title === "string") patch.title = body.title;
   if ("person_name" in body) patch.person_name = body.person_name ?? null;
   if ("background_image_url" in body) patch.background_image_url = body.background_image_url ?? null;
+  if ("start_question_id" in body) patch.start_question_id = body.start_question_id ?? null;
 
   if (Object.keys(patch).length === 0) return json({ status: "missing_patch_fields" }, 400);
 

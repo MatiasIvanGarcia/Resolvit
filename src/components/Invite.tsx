@@ -11,22 +11,36 @@ const fadeSlide = {
   exit: { opacity: 0, y: -10, filter: "blur(6px)" },
 };
 
+type Question = { id: string; ord: number; title: string; subtitle: string | null; options: Array<{ id: string; ord: number; label: string; image_url: string | null; next_question_id: string | null }> };
+
 export function Invite() {
   const code = window.location.pathname.split("/").pop() || "";
   const [plan, setPlan] = React.useState<PublicPlan | null>(null);
   const [loading, setLoading] = React.useState(true);
 
-  const [idx, setIdx] = React.useState(0);
+  const [currentQuestionId, setCurrentQuestionId] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [answers, setAnswers] = React.useState<Record<string, string>>({});
   const [result, setResult] = React.useState<{ invitation_text?: string } | null>(null);
   const [voterName, setVoterName] = React.useState("");
   const [nameReady, setNameReady] = React.useState(false);
+  const [visitedCount, setVisitedCount] = React.useState(0);
+
+  const questionMap = React.useMemo(() => {
+    if (!plan || plan.status !== "ok") return new Map<string, Question>();
+    const map = new Map<string, Question>();
+    for (const q of plan.questions) {
+      map.set(q.id, q);
+    }
+    return map;
+  }, [plan]);
 
   const orderedQuestions = React.useMemo(() => {
-    if (!plan || plan.status !== "ok") return [];
-    return plan.questions.slice().sort((a: { ord: number }, b: { ord: number }) => a.ord - b.ord);
+    if (!plan || plan.status !== "ok") return [] as Question[];
+    return plan.questions.slice().sort((a: Question, b: Question) => a.ord - b.ord);
   }, [plan]);
+
+  const currentQuestion = currentQuestionId ? questionMap.get(currentQuestionId) ?? null : null;
 
   React.useEffect(() => {
     let cancelled = false;
@@ -48,6 +62,12 @@ export function Invite() {
   }, [code]);
 
   React.useEffect(() => {
+    if (!plan || plan.status !== "ok") return;
+    const startId = plan.plan.start_question_id || (orderedQuestions.length > 0 ? orderedQuestions[0].id : null);
+    setCurrentQuestionId(startId);
+  }, [plan, orderedQuestions]);
+
+  React.useEffect(() => {
     const key = `resolvit:voterName:${code}`;
     const saved = localStorage.getItem(key) || "";
     if (saved.trim()) {
@@ -64,10 +84,14 @@ export function Invite() {
   }, [voterName, code]);
 
   function restart() {
-    setIdx(0);
+    const startId = plan && plan.status === "ok"
+      ? (plan.plan.start_question_id || (orderedQuestions.length > 0 ? orderedQuestions[0].id : null))
+      : null;
+    setCurrentQuestionId(startId);
     setBusy(false);
     setAnswers({});
     setResult(null);
+    setVisitedCount(0);
   }
 
   async function finalize(finalAnswers: Record<string, string>) {
@@ -162,29 +186,33 @@ export function Invite() {
     );
   }
 
-  const total = orderedQuestions.length;
-  const done = idx >= total;
-  const q = orderedQuestions[idx];
+  const q = currentQuestion;
+  const done = q === null && visitedCount > 0;
+  const bgUrl = (plan.plan as any).background_image_url ?? null;
 
   async function pick(optionId: string) {
-    if (busy) return;
+    if (busy || !q) return;
     setBusy(true);
 
     const nextAnswers = { ...answers, [q.id]: optionId };
     setAnswers(nextAnswers);
 
-    window.setTimeout(async () => {
-      const next = idx + 1;
-      setIdx(next);
-      setBusy(false);
+    const selectedOption = q.options.find((o: { id: string }) => o.id === optionId);
+    const nextQId = selectedOption?.next_question_id ?? null;
 
-      if (next >= total) {
+    window.setTimeout(async () => {
+      setVisitedCount((c) => c + 1);
+
+      if (nextQId) {
+        setCurrentQuestionId(nextQId);
+        setBusy(false);
+      } else {
+        setCurrentQuestionId(null);
         await finalize(nextAnswers);
+        setBusy(false);
       }
     }, 220);
   }
-
-  const bgUrl = (plan.plan as any).background_image_url ?? null;
 
   return (
     <div className="min-h-screen text-white relative overflow-hidden">
@@ -223,7 +251,7 @@ export function Invite() {
 
           <main className="mt-7">
             <AnimatePresence mode="wait">
-              {!done ? (
+              {!done && q ? (
                 <motion.section
                   key={q.id}
                   {...fadeSlide}
@@ -236,35 +264,35 @@ export function Invite() {
                     </div>
                     <div className="text-white/70 text-base md:text-lg">{q.subtitle || ""}</div>
                     <div className="text-xs text-white/60 mt-1">
-                      {idx + 1} / {total}
+                      Pregunta {visitedCount + 1}
                     </div>
                   </div>
 
                   {(() => {
-                      const sortedOpts = q.options
-                        .slice()
-                        .sort((a: { ord: number }, b: { ord: number }) => a.ord - b.ord);
-                      const isCompact = sortedOpts.length > 2;
-                      const gridCols = sortedOpts.length <= 2
-                        ? "grid-cols-1 md:grid-cols-2"
-                        : sortedOpts.length <= 4
-                          ? "grid-cols-2 md:grid-cols-2"
-                          : "grid-cols-2 md:grid-cols-3";
-                      return (
-                        <div className={`grid ${gridCols} gap-4`}>
-                          {sortedOpts.map((o: { id: string; ord: number; label: string; image_url: string | null }) => (
-                            <OptionCard
-                              key={o.id}
-                              label={o.label === EMPTY ? "" : o.label || ""}
-                              imageUrl={o.image_url}
-                              disabled={busy}
-                              onPick={() => pick(o.id)}
-                              compact={isCompact}
-                            />
-                          ))}
-                        </div>
-                      );
-                    })()}
+                    const sortedOpts = q.options
+                      .slice()
+                      .sort((a: { ord: number }, b: { ord: number }) => a.ord - b.ord);
+                    const isCompact = sortedOpts.length > 2;
+                    const gridCols = sortedOpts.length <= 2
+                      ? "grid-cols-1 md:grid-cols-2"
+                      : sortedOpts.length <= 4
+                        ? "grid-cols-2 md:grid-cols-2"
+                        : "grid-cols-2 md:grid-cols-3";
+                    return (
+                      <div className={`grid ${gridCols} gap-4`}>
+                        {sortedOpts.map((o: { id: string; ord: number; label: string; image_url: string | null }) => (
+                          <OptionCard
+                            key={o.id}
+                            label={o.label === EMPTY ? "" : o.label || ""}
+                            imageUrl={o.image_url}
+                            disabled={busy}
+                            onPick={() => pick(o.id)}
+                            compact={isCompact}
+                          />
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </motion.section>
               ) : (
                 <motion.section

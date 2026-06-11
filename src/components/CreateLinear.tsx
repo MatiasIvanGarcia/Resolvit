@@ -325,6 +325,15 @@ export function CreateLinear({ session }: { session: { access_token: string } })
         }
       }
 
+      // Set start_question_id if this is the first question
+      if (questions.length === 0) {
+        await authedFetch(`/api/private/plan/${encodeURIComponent(plan.id)}`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ start_question_id: newQ.id }),
+        });
+        setPlan((p) => (p ? { ...p, start_question_id: newQ.id } as PlanRow : p));
+      }
+
       setQuestions((prev) => [...prev, newQ]);
       setOptionsByQuestion((prev) => ({ ...prev, [newQ.id]: newOpts }));
     } catch (e: any) {
@@ -631,6 +640,32 @@ export function CreateLinear({ session }: { session: { access_token: string } })
                           onBlur={() => patchOption(q.id, o.id, { image_url: o.image_url ?? null } as any)}
                           placeholder="URL imagen (opcional)"
                         />
+                        <div className="mt-2">
+                          <div className="text-xs text-white/60 mb-1">Siguiente pregunta</div>
+                          <select
+                            className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none text-white/80 appearance-none"
+                            value={o.next_question_id ?? ""}
+                            onChange={(e) => {
+                              const val = e.target.value || null;
+                              setOptionsByQuestion((prev) => ({
+                                ...prev,
+                                [q.id]: (prev[q.id] || []).map((opt) =>
+                                  opt.id === o.id ? { ...opt, next_question_id: val } : opt
+                                ),
+                              }));
+                              patchOption(q.id, o.id, { next_question_id: val } as any);
+                            }}
+                          >
+                            <option value="">Fin del recorrido</option>
+                            {sortedQuestions
+                              .filter((sq) => sq.id !== q.id)
+                              .map((sq) => (
+                                <option key={sq.id} value={sq.id}>
+                                  {sq.subtitle || sq.title || `Pregunta ${sq.ord}`}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
                       </div>
                     ))}
 
