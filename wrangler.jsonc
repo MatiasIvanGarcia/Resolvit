@@ -1,5 +1,5 @@
 {
-  "name": "plan-invitacion",
+  "name": "resolvit",
   "compatibility_date": "2026-02-01",
   "main": "worker/worker.ts",
   "assets": {
