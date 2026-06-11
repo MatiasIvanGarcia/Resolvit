@@ -240,21 +240,31 @@ export function Invite() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    {q.options
-                      .slice()
-                      .sort((a: { ord: number }, b: { ord: number }) => a.ord - b.ord)
-                      .slice(0, 2)
-                      .map((o: { id: string; ord: number; label: string; image_url: string | null }) => (
-                        <OptionCard
-                          key={o.id}
-                          label={o.label === EMPTY ? "" : o.label || ""}
-                          imageUrl={o.image_url}
-                          disabled={busy}
-                          onPick={() => pick(o.id)}
-                        />
-                      ))}
-                  </div>
+                  {(() => {
+                      const sortedOpts = q.options
+                        .slice()
+                        .sort((a: { ord: number }, b: { ord: number }) => a.ord - b.ord);
+                      const isCompact = sortedOpts.length > 2;
+                      const gridCols = sortedOpts.length <= 2
+                        ? "grid-cols-1 md:grid-cols-2"
+                        : sortedOpts.length <= 4
+                          ? "grid-cols-2 md:grid-cols-2"
+                          : "grid-cols-2 md:grid-cols-3";
+                      return (
+                        <div className={`grid ${gridCols} gap-4`}>
+                          {sortedOpts.map((o: { id: string; ord: number; label: string; image_url: string | null }) => (
+                            <OptionCard
+                              key={o.id}
+                              label={o.label === EMPTY ? "" : o.label || ""}
+                              imageUrl={o.image_url}
+                              disabled={busy}
+                              onPick={() => pick(o.id)}
+                              compact={isCompact}
+                            />
+                          ))}
+                        </div>
+                      );
+                    })()}
                 </motion.section>
               ) : (
                 <motion.section

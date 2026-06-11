@@ -58,7 +58,7 @@ export function CreateLinear({ session }: { session: { access_token: string } })
 
   function isComplete(q: QuestionRow) {
     const opts = getOpts(q.id);
-    return Boolean(q.subtitle?.trim()) && opts.length === 2 && opts.every((o) => (o.label || "").trim().length > 0);
+    return opts.length >= 2 && Boolean(q.subtitle?.trim()) && opts.every((o) => (o.label || "").trim().length > 0);
   }
 
   const canPublish = Boolean(plan?.id) && sortedQuestions.length > 0 && sortedQuestions.every(isComplete);
@@ -383,6 +383,50 @@ export function CreateLinear({ session }: { session: { access_token: string } })
     }
   }
 
+  async function addOption(qid: string) {
+    if (!plan?.id) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const existingOpts = getOpts(qid);
+      const nextOrd = existingOpts.length > 0 ? Math.max(...existingOpts.map((o) => o.ord)) + 1 : 1;
+      const newOpt: OptionRow = await authedFetch("/api/private/option", token, {
+        method: "POST",
+        body: JSON.stringify({ question_id: qid, ord: nextOrd, label: "", image_url: null }),
+      });
+      setOptionsByQuestion((prev) => ({
+        ...prev,
+        [qid]: [...(prev[qid] || []), newOpt],
+      }));
+    } catch (e: any) {
+      setError(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeOption(qid: string, oid: string) {
+    const opts = getOpts(qid);
+    if (opts.length <= 2) {
+      setError("Cada pregunta necesita al menos 2 opciones.");
+      return;
+    }
+    if (!confirm("¿Eliminar esta opción?")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await authedFetch(`/api/private/option/${encodeURIComponent(oid)}`, token, { method: "DELETE" });
+      setOptionsByQuestion((prev) => ({
+        ...prev,
+        [qid]: (prev[qid] || []).filter((o) => o.id !== oid),
+      }));
+    } catch (e: any) {
+      setError(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function publish(expiresHours: number | null) {
     if (!plan?.id) return;
     setBusy(true);
@@ -497,7 +541,7 @@ export function CreateLinear({ session }: { session: { access_token: string } })
         {plan && (
           <div className="mt-6 space-y-4">
             {sortedQuestions.map((q, idx) => {
-              const [o1, o2] = getOpts(q.id);
+              const opts = getOpts(q.id);
               const complete = isComplete(q);
 
               return (
@@ -543,70 +587,61 @@ export function CreateLinear({ session }: { session: { access_token: string } })
                     />
                   </div>
 
-                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                      <div className="text-xs text-white/60 mb-2">Opción izquierda</div>
-                      <input
-                        className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                        value={o1?.label ?? ""}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setOptionsByQuestion((prev) => ({
-                            ...prev,
-                            [q.id]: (prev[q.id] || []).map((o) => (o.id === o1?.id ? { ...o, label: v } : o)),
-                          }));
-                        }}
-                        onBlur={() => o1 && patchOption(q.id, o1.id, { label: o1.label ?? "" } as any)}
-                        placeholder="Escribí la opción izquierda..."
-                      />
-                      <input
-                        className="mt-2 w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                        value={o1?.image_url ?? ""}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setOptionsByQuestion((prev) => ({
-                            ...prev,
-                            [q.id]: (prev[q.id] || []).map((o) =>
-                              o.id === o1?.id ? { ...o, image_url: v || null } : o
-                            ),
-                          }));
-                        }}
-                        onBlur={() => o1 && patchOption(q.id, o1.id, { image_url: o1.image_url ?? null } as any)}
-                        placeholder="URL imagen (opcional)"
-                      />
-                    </div>
+                  <div className="mt-4 space-y-3">
+                    {opts.map((o, oIdx) => (
+                      <div key={o.id} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="text-xs text-white/60">Opción {oIdx + 1}</div>
+                          {opts.length > 2 && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => removeOption(q.id, o.id)}
+                              className="text-xs text-red-300 hover:text-red-200 disabled:opacity-50"
+                            >
+                              Eliminar
+                            </button>
+                          )}
+                        </div>
+                        <input
+                          className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+                          value={o.label ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setOptionsByQuestion((prev) => ({
+                              ...prev,
+                              [q.id]: (prev[q.id] || []).map((opt) => (opt.id === o.id ? { ...opt, label: v } : opt)),
+                            }));
+                          }}
+                          onBlur={() => patchOption(q.id, o.id, { label: o.label ?? "" } as any)}
+                          placeholder={`Escribí la opción ${oIdx + 1}...`}
+                        />
+                        <input
+                          className="mt-2 w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
+                          value={o.image_url ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setOptionsByQuestion((prev) => ({
+                              ...prev,
+                              [q.id]: (prev[q.id] || []).map((opt) =>
+                                opt.id === o.id ? { ...opt, image_url: v || null } : opt
+                              ),
+                            }));
+                          }}
+                          onBlur={() => patchOption(q.id, o.id, { image_url: o.image_url ?? null } as any)}
+                          placeholder="URL imagen (opcional)"
+                        />
+                      </div>
+                    ))}
 
-                    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                      <div className="text-xs text-white/60 mb-2">Opción derecha</div>
-                      <input
-                        className="w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                        value={o2?.label ?? ""}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setOptionsByQuestion((prev) => ({
-                            ...prev,
-                            [q.id]: (prev[q.id] || []).map((o) => (o.id === o2?.id ? { ...o, label: v } : o)),
-                          }));
-                        }}
-                        onBlur={() => o2 && patchOption(q.id, o2.id, { label: o2.label ?? "" } as any)}
-                        placeholder="Escribí la opción derecha..."
-                      />
-                      <input
-                        className="mt-2 w-full rounded-2xl bg-white/10 border border-white/15 px-4 py-3 outline-none"
-                        value={o2?.image_url ?? ""}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setOptionsByQuestion((prev) => ({
-                            ...prev,
-                            [q.id]: (prev[q.id] || []).map((o) =>
-                              o.id === o2?.id ? { ...o, image_url: v || null } : o
-                            ),
-                          }));
-                        }}
-                        onBlur={() => o2 && patchOption(q.id, o2.id, { image_url: o2.image_url ?? null } as any)}
-                        placeholder="URL imagen (opcional)"
-                      />
-                    </div>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      className="w-full rounded-2xl border border-dashed border-white/20 bg-white/5 px-4 py-3 text-sm text-white/60 hover:bg-white/10 hover:text-white/80 disabled:opacity-50 transition-colors"
+                      onClick={() => addOption(q.id)}
+                    >
+                      + Agregar opción
+                    </button>
                   </div>
                 </div>
               );

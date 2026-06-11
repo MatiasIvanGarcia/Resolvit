@@ -212,42 +212,6 @@ if (
 
   return json({ status: "ok", plan, stats: sRes.data });
 }
-// GET /api/private/plan/:id/stats  -> stats + plan meta (para background/titulo)
-if (
-  request.method === "GET" &&
-  url.pathname.startsWith("/api/private/plan/") &&
-  url.pathname.endsWith("/stats")
-) {
-  const token = getAuthToken(request);
-  if (!token) return json({ status: "unauthorized" }, 401);
-
-  const parts = url.pathname.split("/");
-  const planId = parts[4]; // /api/private/plan/:id/stats
-  if (!planId) return json({ status: "missing_plan_id" }, 400);
-
-  // 1) plan meta (RLS aplica: solo dueño)
-  const pRes = await supabaseRest(
-    env,
-    `/rest/v1/plans?id=eq.${encodeURIComponent(planId)}&select=id,title,person_name,status,background_image_url`,
-    { method: "GET" },
-    token
-  );
-  if (!pRes.ok) return json({ status: "error", step: "get_plan", detail: pRes.data }, 400);
-
-  const plan = pRes.data?.[0] ?? null;
-  if (!plan) return json({ status: "not_found" }, 404);
-
-  // 2) stats via RPC (security definer)
-  const sRes = await supabaseRest(
-    env,
-    `/rest/v1/rpc/get_plan_stats`,
-    { method: "POST", body: JSON.stringify({ p_plan_id: plan.id }) },
-    token
-  );
-  if (!sRes.ok) return json({ status: "error", step: "get_stats", detail: sRes.data }, 400);
-
-  return json({ status: "ok", plan, stats: sRes.data });
-}
 
       // GET /api/private/plan/:id/builder  -> plan + questions + options
 if (request.method === "GET" && url.pathname.startsWith("/api/private/plan/") && url.pathname.endsWith("/builder")) {
@@ -662,7 +626,37 @@ if (
         return json({ status: "ok" });
       }
 
-      // POST /api/private/options2 { question_id, a:{label,image_url}, b:{label,image_url} }
+      // POST /api/private/option { question_id, label, image_url?, ord? } — crear una opción
+      if (request.method === "POST" && url.pathname === "/api/private/option") {
+        const token = getAuthToken(request);
+        if (!token) return json({ status: "unauthorized" }, 401);
+
+        const body = await request.json().catch(() => null);
+        if (!body?.question_id) return json({ status: "missing_question_id" }, 400);
+
+        const payload: any = {
+          question_id: body.question_id,
+          label: body.label ?? "",
+          image_url: body.image_url ?? null,
+        };
+        if (typeof body.ord === "number") payload.ord = body.ord;
+
+        const { ok, data } = await supabaseRest(
+          env,
+          `/rest/v1/options?select=id,question_id,ord,label,image_url,next_question_id`,
+          {
+            method: "POST",
+            headers: { Prefer: "return=representation" },
+            body: JSON.stringify(payload),
+          },
+          token
+        );
+
+        if (!ok) return json({ status: "error", detail: data }, 400);
+        return json(data?.[0] ?? data);
+      }
+
+      // POST /api/private/options2 { question_id, a:{label,image_url}, b:{label,image_url} } — legacy: crear 2 opciones
       if (request.method === "POST" && url.pathname === "/api/private/options2") {
         const token = getAuthToken(request);
         if (!token) return json({ status: "unauthorized" }, 401);
@@ -689,6 +683,25 @@ if (
 
         if (!ok) return json({ status: "error", detail: data }, 400);
         return json(data);
+      }
+
+      // DELETE /api/private/option/:id — borrar una opción
+      if (request.method === "DELETE" && url.pathname.startsWith("/api/private/option/")) {
+        const token = getAuthToken(request);
+        if (!token) return json({ status: "unauthorized" }, 401);
+
+        const id = url.pathname.split("/").pop() || "";
+        if (!id) return json({ status: "missing_id" }, 400);
+
+        const { ok, data } = await supabaseRest(
+          env,
+          `/rest/v1/options?id=eq.${encodeURIComponent(id)}`,
+          { method: "DELETE" },
+          token
+        );
+
+        if (!ok) return json({ status: "error", detail: data }, 400);
+        return json({ status: "ok" });
       }
 
       // ✅ PATCH /api/private/option/:id { next_question_id?, label?, image_url? }
